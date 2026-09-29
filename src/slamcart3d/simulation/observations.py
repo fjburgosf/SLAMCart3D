@@ -16,7 +16,7 @@ from slamcart3d.sensors.imu import PlanarIMU
 from slamcart3d.sensors.lidar import PlanarLidar
 from slamcart3d.sensors.lidar3d import MultiLayerLidar
 from slamcart3d.simulation.motion import motion_command
-from slamcart3d.worlds.geometry import World3D, make_world
+from slamcart3d.worlds.geometry import WallSegment, World3D, make_world
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,7 @@ class SimulationFrame:
 
     timestamp_s: float
     ground_truth: Pose2D
+    blocked_by_wall: bool
     ideal_lidar: LidarScan
     measured_lidar: LidarScan
     commanded_left_rate_rad_s: float
@@ -49,7 +50,13 @@ class ObservationStream:
             config.robot.initial_y_m,
             config.robot.initial_yaw_rad,
         )
-        self.world: World3D = make_world(config.simulation.world, config.seed)
+        if config.simulation.world == "custom":
+            self.world = World3D(
+                name="custom",
+                segments=tuple(WallSegment(**wall.__dict__) for wall in config.simulation.world_segments),
+            )
+        else:
+            self.world = make_world(config.simulation.world, config.seed)
         self.timesteps = int(round(config.simulation.duration_s / config.simulation.timestep_s))
         self.timestamps = np.arange(self.timesteps + 1, dtype=float) * config.simulation.timestep_s
 
@@ -68,7 +75,23 @@ class ObservationStream:
             progress = (step_index + 1) / self.timesteps
             linear_velocity, yaw_rate = motion_command(config.simulation, step_index, self.timesteps)
             left, right = robot.wheel_rates(linear_velocity, yaw_rate)
+            previous_pose = robot.pose
             true_pose = robot.step(left, right, config.simulation.timestep_s)
+            blocked_by_wall = (
+                config.simulation.stop_at_walls
+                and self.world.path_clearance_m(
+                    (previous_pose.x, previous_pose.y),
+                    (true_pose.x, true_pose.y),
+                    float(timestamp),
+                )
+                < config.robot.wheel_base_m / 2.0
+            )
+            if blocked_by_wall:
+                robot.pose = previous_pose
+                true_pose = previous_pose
+                left = right = 0.0
+                linear_velocity = 0.0
+                yaw_rate = 0.0
             ideal_scan = lidar.scan(float(timestamp), true_pose, self.world)
             measured_scan = degradation.degrade_lidar(
                 ideal_scan, config.lidar.max_range_m, progress, true_pose
@@ -108,6 +131,7 @@ class ObservationStream:
             yield SimulationFrame(
                 timestamp_s=float(timestamp),
                 ground_truth=true_pose,
+                blocked_by_wall=blocked_by_wall,
                 ideal_lidar=ideal_scan,
                 measured_lidar=measured_scan,
                 commanded_left_rate_rad_s=left,

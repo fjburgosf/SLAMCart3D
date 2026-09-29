@@ -53,7 +53,11 @@ def run_batch(
     ):
         raise ValueError("batch seeds, algorithms, and worlds must be unique")
     for world in worlds:
-        make_world(world, base.seed)
+        if world == "custom":
+            if not base.simulation.world_segments:
+                raise ValueError("custom batch world requires wall segments in the base configuration")
+        else:
+            make_world(world, base.seed)
     configurations = tuple(
         replace(
             base,

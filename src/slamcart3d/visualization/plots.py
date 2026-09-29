@@ -102,6 +102,7 @@ def save_run_figure(result: RunResult, path: str | Path) -> Path:
         "dead_reckoning": "Dead reckoning",
         "wheel_imu_fusion": "Wheel/IMU odometry",
         "icp_odometry": "ICP odometry",
+        "adaptive_hybrid": "Adaptive hybrid scan-to-map",
     }
     algorithm_label = algorithm_labels.get(
         str(result.diagnostics["algorithm"]), str(result.diagnostics["algorithm"])

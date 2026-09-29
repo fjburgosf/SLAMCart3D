@@ -12,6 +12,13 @@ import numpy as np
 from slamcart3d.datasets.generator import generate_dataset
 from slamcart3d.experiments.batch import export_batch, run_batch
 from slamcart3d.experiments.experiment import Experiment
+from slamcart3d.experiments.hybrid_validation import (
+    DEFAULT_SCENARIOS,
+    METHODS,
+    export_hybrid_benchmark,
+    run_hybrid_benchmark,
+)
+from slamcart3d.experiments.sweep import SWEEP_PARAMETERS, export_parameter_sweep, run_parameter_sweep
 from slamcart3d.metrics.direction import HIGHER_IS_BETTER, LOWER_IS_BETTER
 from slamcart3d.robustness.benchmark import compare_sampling_methods, run_asrf_ablation, validate_asrf
 from slamcart3d.robustness.real_comparison import compare_real_sampling, export_real_comparison
@@ -46,10 +53,31 @@ def _parser() -> argparse.ArgumentParser:
     batch = commands.add_parser("batch", help="compare algorithms and worlds over independent seeds")
     batch.add_argument("config", type=Path)
     batch.add_argument("--seeds", default="0,1,2,3,4")
-    batch.add_argument("--algorithms", default="dead_reckoning,icp_odometry,wheel_imu_fusion")
+    batch.add_argument("--algorithms", default="dead_reckoning,icp_odometry,wheel_imu_fusion,adaptive_hybrid")
     batch.add_argument("--worlds", default="indoor_simple")
     batch.add_argument("--workers", default="1", help="positive integer or auto")
     batch.add_argument("--output", type=Path, default=Path("results"))
+    sweep = commands.add_parser("sweep", help="vary one condition over paired seeds and report a metric")
+    sweep.add_argument("config", type=Path)
+    sweep.add_argument("--parameter", choices=SWEEP_PARAMETERS, default="lidar_noise_std_m")
+    sweep.add_argument("--min", type=float, default=0.0)
+    sweep.add_argument("--max", type=float, default=0.4)
+    sweep.add_argument("--levels", type=int, default=5)
+    sweep.add_argument("--seeds", default="0,1,2,3,4")
+    sweep.add_argument(
+        "--metric", choices=("ate_rmse_m", "rpe_translation_rmse_m", "map_f1_0p25"), default="ate_rmse_m"
+    )
+    sweep.add_argument("--threshold", type=float, default=0.5)
+    sweep.add_argument("--output", type=Path, default=Path("results"))
+    hybrid = commands.add_parser(
+        "benchmark-hybrid", help="compare local SLAM methods and hybrid ablations under paired conditions"
+    )
+    hybrid.add_argument("config", type=Path)
+    hybrid.add_argument("--seeds", default="5,6,7,8,9")
+    hybrid.add_argument("--scenarios", default=",".join(s.name for s in DEFAULT_SCENARIOS))
+    hybrid.add_argument("--methods", default=",".join(METHODS))
+    hybrid.add_argument("--output", type=Path, default=Path("results"))
+    hybrid.add_argument("--plot", action="store_true")
     benchmark = commands.add_parser("validate-asrf", help="validate ASRF against a known synthetic frontier")
     benchmark.add_argument("--budget", type=int, default=50)
     benchmark.add_argument("--seed", type=int, default=42)
@@ -117,6 +145,31 @@ def main(argv: list[str] | None = None) -> int:
         result = run_batch(Experiment.from_file(args.config).config, seeds, algorithms, worlds, workers)
         target = export_batch(result, args.output)
         logging.getLogger(__name__).info("batch exported to %s", target)
+        return 0
+    if args.command == "sweep":
+        seeds = tuple(int(value.strip()) for value in args.seeds.split(",") if value.strip())
+        levels = tuple(float(value) for value in np.linspace(args.min, args.max, args.levels))
+        result = run_parameter_sweep(
+            Experiment.from_file(args.config).config,
+            args.parameter,
+            levels,
+            seeds,
+            args.metric,
+            args.threshold,
+        )
+        target = export_parameter_sweep(result, args.output)
+        logging.getLogger(__name__).info("controlled study exported to %s", target)
+        return 0
+    if args.command == "benchmark-hybrid":
+        seeds = tuple(int(value.strip()) for value in args.seeds.split(",") if value.strip())
+        names = tuple(value.strip() for value in args.scenarios.split(",") if value.strip())
+        scenarios = tuple(s for s in DEFAULT_SCENARIOS if s.name in names)
+        if len(scenarios) != len(names) or len(set(names)) != len(names):
+            raise ValueError("scenarios must be unique names from the predefined benchmark")
+        methods = tuple(value.strip() for value in args.methods.split(",") if value.strip())
+        result = run_hybrid_benchmark(Experiment.from_file(args.config).config, scenarios, seeds, methods)
+        target = export_hybrid_benchmark(result, args.output, plot=args.plot)
+        logging.getLogger(__name__).info("hybrid benchmark exported to %s", target)
         return 0
     if args.command == "validate-asrf":
         metrics = validate_asrf(args.budget, args.seed)

@@ -251,8 +251,115 @@ def test_3d_tab_shows_estimated_cloud_and_translates(application, tmp_path) -> N
     window.language_combo.setCurrentIndex(1)
     assert window.tabs.tabText(5) == "3D point cloud"
     assert window.cloud_canvas.count_label == "points"
-    assert window.cloud_canvas.legend_labels == ("Wall", "Cloud", "Truth", "Estimate")
+    assert window.cloud_canvas.legend_labels == (
+        "True world",
+        "Estimated cloud",
+        "True cart",
+        "Estimated cart",
+    )
     assert "not 6DoF SLAM" in window.cloud_hint.text()
+    window.close()
+
+
+def test_live_timeline_saves_and_replays_steps(application, tmp_path) -> None:
+    window = MainWindow()
+    base = window.current_config()
+    short = replace(
+        base,
+        lidar=replace(base.lidar, beam_count=8),
+        lidar3d=replace(base.lidar3d, enabled=True, azimuth_beams=3, elevation_beams=3),
+        simulation=replace(base.simulation, duration_s=0.5, timestep_s=0.1),
+    )
+    window._set_from_config(short)
+    window._inputs["output"].setText(str(tmp_path))
+    window._run_experiment()
+    deadline = time.monotonic() + 10.0
+    while window.step_slider.maximum() < 1 and time.monotonic() < deadline:
+        application.processEvents()
+        QTest.qWait(10)
+    assert window._worker is not None and window._worker.isRunning()
+    target = next(tmp_path.glob("EXP-*"))
+    assert (target / "trajectory_live.csv").is_file()
+    assert (target / "point_cloud_3d_live.csv").is_file()
+    assert window.step_slider.value() >= 1
+    window.previous_button.click()
+    assert window.step_slider.value() == 0
+    assert window.cloud_canvas.result is not None
+    window.tabs.setCurrentIndex(5)
+    window.show()
+    application.processEvents()
+    assert not window.cloud_canvas.grab().isNull()
+    while window._worker is not None and time.monotonic() < deadline:
+        application.processEvents()
+        QTest.qWait(10)
+    assert window._last_result is not None
+    assert window.step_slider.value() == 0
+    window.next_button.click()
+    assert window.step_slider.value() == 1
+    assert len(window.cloud_canvas.result.timestamps) == 2
+    window.step_slider.setValue(window.step_slider.maximum())
+    assert window.cloud_canvas.result is window._last_result
+    window.close()
+
+
+def test_custom_world_can_be_edited_in_gui(application) -> None:
+    window = MainWindow()
+    window._inputs["world"].setCurrentIndex(window._inputs["world"].findData("custom"))
+    window._inputs["world_segments"].setPlainText(
+        "0, 0, 8, 0, 2.5\n8, 0, 8, 8, 3.0\n8, 8, 0, 8, 2.5\n0, 8, 0, 0, 2.5"
+    )
+    config = window.current_config()
+    assert config.simulation.world == "custom"
+    assert len(config.simulation.world_segments) == 4
+    window._set_from_config(config)
+    assert "8, 0, 8, 8, 3" in window._inputs["world_segments"].toPlainText()
+    window.close()
+
+
+def test_ground_truth_can_be_hidden_without_changing_run_data(application) -> None:
+    window = MainWindow()
+    config = ExperimentConfig(
+        lidar=LidarConfig(beam_count=8),
+        simulation=SimulationConfig(duration_s=0.2, timestep_s=0.1),
+    )
+    result = run_simulation(config)
+    window._on_completed(result, "test export")
+    window.reference_checkbox.click()
+    assert not window.reference_checkbox.isChecked()
+    assert not window.canvas.show_reference
+    assert not window.cloud_canvas.show_reference
+    assert window._last_result is result
+    window.tabs.setCurrentIndex(5)
+    window.show()
+    application.processEvents()
+    assert not window.cloud_canvas.grab().isNull()
+    window.reference_checkbox.click()
+    assert window.cloud_canvas.show_reference
+    window.close()
+
+
+def test_controlled_study_button_builds_plot_and_exports(application, tmp_path) -> None:
+    window = MainWindow()
+    base = window.current_config()
+    short = replace(
+        base, lidar=replace(base.lidar, beam_count=8), simulation=replace(base.simulation, duration_s=0.2)
+    )
+    window._set_from_config(short)
+    window._inputs["output"].setText(str(tmp_path))
+    window.sweep_levels.setValue(2)
+    window.sweep_seeds.setText("0,1")
+    window.tabs.setCurrentIndex(8)
+    window.sweep_button.click()
+    deadline = time.monotonic() + 20.0
+    while window._sweep_worker is not None and time.monotonic() < deadline:
+        application.processEvents()
+        QTest.qWait(10)
+    assert window._sweep_worker is None
+    assert window.sweep_button.isEnabled()
+    assert window._last_sweep_path is not None
+    assert window.sweep_canvas.study is not None
+    assert window.sweep_table.rowCount() == 2
+    assert (window._last_sweep_path / "study_curve_gui.png").stat().st_size > 0
     window.close()
 
 

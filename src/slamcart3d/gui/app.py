@@ -25,8 +25,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSlider,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -35,21 +37,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from slamcart3d.core.config import ExperimentConfig
+from slamcart3d.core.config import ExperimentConfig, WallConfig
 from slamcart3d.core.provenance import source_sha256
 from slamcart3d.datasets.generator import generate_dataset
 from slamcart3d.experiments.batch import export_batch, run_batch
+from slamcart3d.experiments.sweep import SWEEP_PARAMETERS
 from slamcart3d.gui.paths import (
     bundled_example_path,
+    configure_local_runtime,
     default_datasets_path,
     default_results_path,
     export_to_requested_path,
 )
 from slamcart3d.gui.robustness import FrontierWorker, RobustnessCanvas
+from slamcart3d.gui.sweep import SweepCanvas, SweepWorker
 from slamcart3d.gui.viewer3d import PointCloudCanvas
-from slamcart3d.io.export import export_result
+from slamcart3d.io.export import IncrementalRunWriter, export_result
 from slamcart3d.robustness.study import run_frontier_study
-from slamcart3d.simulation.runner import RunResult, run_simulation
+from slamcart3d.simulation.runner import RunPreview, RunResult, RunStarted, RunStep, run_simulation
 
 TEXT = {
     "es": {
@@ -69,7 +74,27 @@ TEXT = {
         "dataset_empty": "Genere un dataset para consultar sus archivos.",
         "dataset_completed": "Dataset guardado en {path}",
         "dataset_no_camera": "Este dataset no tiene imágenes de cámara medidas.",
-        "cloud3d_hint": "Arrastre para girar; use la rueda para acercar. Puntos ubicados con pose planar estimada; no es SLAM 6DoF.",
+        "cloud3d_hint": "El piso cuadriculado está en z=0; las superficies azules son paredes verdaderas, la nube cian es el mapa estimado. Arrastre para girar y use la rueda para acercar. No es SLAM 6DoF.",
+        "step_previous": "◀ Anterior",
+        "step_next": "Siguiente ▶",
+        "step_label": "Paso {index}/{total} · t = {time:.2f} s",
+        "step_empty": "Ejecute un experimento para recorrer sus pasos.",
+        "step_saved": "Guardado incremental: {path}",
+        "show_reference": "Mostrar realidad simulada",
+        "sweep": "Estudio controlado",
+        "sweep_hint": "Cambie una sola condición y repita las mismas semillas en cada nivel. La curva muestra la media y un intervalo descriptivo del 95 %; la línea roja es el umbral de fallo.",
+        "sweep_parameter": "Variable experimental",
+        "sweep_min": "Mínimo",
+        "sweep_max": "Máximo",
+        "sweep_levels": "Niveles",
+        "sweep_seeds": "Semillas pareadas",
+        "sweep_metric": "Métrica de respuesta",
+        "sweep_threshold": "Umbral de fallo",
+        "sweep_run": "Ejecutar estudio",
+        "sweep_running": "Ejecutando estudio…",
+        "sweep_empty": "Defina una variable, al menos dos niveles y varias semillas para evaluar una hipótesis.",
+        "sweep_completed": "Estudio guardado en {path}",
+        "sweep_failure": "Fracción de fallos",
         "empty_cloud3d": "Ejecute un experimento con lidar3d.enabled=true para ver la nube 3D.",
         "metrics": "Métricas",
         "batch": "Lotes",
@@ -158,9 +183,13 @@ TEXT = {
         "world_warehouse_shelves": "Almacén con estanterías",
         "world_indoor_dynamic": "Interior dinámico",
         "world_outdoor_blocks": "Exterior con edificios",
+        "world_custom": "Entorno personalizado",
+        "world_segments": "Paredes 3D (x1, y1, x2, y2, altura; una por línea)",
+        "stop_at_walls": "Detener carrito al chocar con paredes",
         "algorithm_dead_reckoning": "Odometría de ruedas",
         "algorithm_icp_odometry": "Odometría LiDAR ICP",
         "algorithm_wheel_imu_fusion": "Fusión ruedas/IMU",
+        "algorithm_adaptive_hybrid": "Híbrido adaptativo propuesto",
         "motion_constant": "Constante",
         "motion_sinusoidal_yaw": "Giro sinusoidal",
         "motion_stop_turn": "Avance y giro alternados",
@@ -183,7 +212,27 @@ TEXT = {
         "dataset_empty": "Generate a dataset to inspect its files.",
         "dataset_completed": "Dataset saved to {path}",
         "dataset_no_camera": "This dataset has no measured camera images.",
-        "cloud3d_hint": "Drag to rotate; use the wheel to zoom. Points use estimated planar pose; this is not 6DoF SLAM.",
+        "cloud3d_hint": "The gridded floor is z=0; blue surfaces are true walls and cyan points are the estimated map. Drag to rotate and use the wheel to zoom. This is not 6DoF SLAM.",
+        "step_previous": "◀ Previous",
+        "step_next": "Next ▶",
+        "step_label": "Step {index}/{total} · t = {time:.2f} s",
+        "step_empty": "Run an experiment to inspect its steps.",
+        "step_saved": "Incremental files: {path}",
+        "show_reference": "Show simulated ground truth",
+        "sweep": "Controlled study",
+        "sweep_hint": "Vary one condition and repeat the same seeds at every level. The curve shows the mean and a descriptive 95% interval; the red line is the failure threshold.",
+        "sweep_parameter": "Experimental variable",
+        "sweep_min": "Minimum",
+        "sweep_max": "Maximum",
+        "sweep_levels": "Levels",
+        "sweep_seeds": "Paired seeds",
+        "sweep_metric": "Response metric",
+        "sweep_threshold": "Failure threshold",
+        "sweep_run": "Run study",
+        "sweep_running": "Running study…",
+        "sweep_empty": "Choose one variable, at least two levels and repeated seeds to test a hypothesis.",
+        "sweep_completed": "Study saved to {path}",
+        "sweep_failure": "Failure fraction",
         "empty_cloud3d": "Run an experiment with lidar3d.enabled=true to view the 3D cloud.",
         "metrics": "Metrics",
         "batch": "Batch",
@@ -272,9 +321,13 @@ TEXT = {
         "world_warehouse_shelves": "Warehouse shelves",
         "world_indoor_dynamic": "Dynamic indoor",
         "world_outdoor_blocks": "Outdoor buildings",
+        "world_custom": "Custom environment",
+        "world_segments": "3D walls (x1, y1, x2, y2, height; one per line)",
+        "stop_at_walls": "Stop cart at walls",
         "algorithm_dead_reckoning": "Wheel odometry",
         "algorithm_icp_odometry": "LiDAR ICP odometry",
         "algorithm_wheel_imu_fusion": "Wheel/IMU fusion",
+        "algorithm_adaptive_hybrid": "Proposed adaptive hybrid",
         "motion_constant": "Constant",
         "motion_sinusoidal_yaw": "Sinusoidal yaw",
         "motion_stop_turn": "Alternating drive and turn",
@@ -283,6 +336,14 @@ TEXT = {
 }
 
 TOOLTIPS = {
+    "stop_at_walls": (
+        "Bloquea el avance del carrito real si su trayectoria se acerca a una pared a menos de medio ancho de ejes.",
+        "Blocks the true cart when its path comes within half the wheelbase of a wall.",
+    ),
+    "world_segments": (
+        "En entorno personalizado, escriba una pared por línea en metros: x1, y1, x2, y2, altura.",
+        "For a custom environment, enter one wall per line in metres: x1, y1, x2, y2, height.",
+    ),
     "name": (
         "Identificador legible que se guarda con cada corrida.",
         "Readable identifier stored with every run.",
@@ -436,6 +497,7 @@ METRIC_LABELS = {
         "Pasos con contacto pared estática [n]",
         "Static-wall contact steps [n]",
     ),
+    "wall_blocked_steps": ("Pasos bloqueados por pared [n]", "Wall-blocked steps [n]"),
     "icp_registration_availability": (
         "Disponibilidad de registro ICP [1]",
         "ICP registration availability [1]",
@@ -508,6 +570,8 @@ class ExperimentWorker(QThread):
 
     completed = Signal(object, str)
     failed = Signal(str)
+    started_run = Signal(object, str)
+    step_ready = Signal(object)
 
     def __init__(self, config: ExperimentConfig, output_root: Path) -> None:
         super().__init__()
@@ -515,11 +579,30 @@ class ExperimentWorker(QThread):
         self.output_root = output_root
 
     def run(self) -> None:
+        writer: IncrementalRunWriter | None = None
+
+        def on_start(started: RunStarted) -> None:
+            nonlocal writer
+            writer = IncrementalRunWriter(started, self.output_root)
+            self.started_run.emit(started, str(writer.target))
+
+        def on_step(step: RunStep) -> None:
+            assert writer is not None
+            writer.append(step)
+            self.step_ready.emit(step)
+            self.msleep(70)
+
         try:
-            result = run_simulation(self.config)
-            target = export_to_requested_path(self.output_root, lambda root: export_result(result, root))
+            result = run_simulation(self.config, on_start=on_start, on_step=on_step)
+            assert writer is not None
+            writer.close()
+            target = export_result(result, self.output_root, reuse_existing=True)
+            writer.complete()
             self.completed.emit(result, str(target))
         except Exception as exc:
+            if writer is not None:
+                writer.close()
+                writer.fail(str(exc))
             self.failed.emit(str(exc))
 
 
@@ -584,6 +667,7 @@ class WorldCanvas(QWidget):
         self.result: RunResult | None = None
         self.language = "es"
         self.occupancy_mode = occupancy_mode
+        self.show_reference = True
         self.setMinimumSize(560, 420)
 
     def paintEvent(self, event) -> None:
@@ -636,27 +720,31 @@ class WorldCanvas(QWidget):
                     ),
                     QColor(colors[state]),
                 )
-        painter.setPen(QPen(QColor("#94a3b8"), 2.0))
-        for wall in result.world.segments:
-            painter.drawLine(point(wall.x1, wall.y1), point(wall.x2, wall.y2))
-        painter.setPen(QPen(QColor("#a855f7"), 2.0))
-        for wall in walls[len(result.world.segments) :]:
-            painter.drawLine(point(wall.x1, wall.y1), point(wall.x2, wall.y2))
+        if self.show_reference:
+            painter.setPen(QPen(QColor("#94a3b8"), 2.0))
+            for wall in result.world.segments:
+                painter.drawLine(point(wall.x1, wall.y1), point(wall.x2, wall.y2))
+            painter.setPen(QPen(QColor("#a855f7"), 2.0))
+            for wall in walls[len(result.world.segments) :]:
+                painter.drawLine(point(wall.x1, wall.y1), point(wall.x2, wall.y2))
         if not self.occupancy_mode:
             painter.setPen(QPen(QColor("#38bdf8"), 2.0))
             for x, y in result.map_points[:: max(1, len(result.map_points) // 2500)]:
                 p = point(float(x), float(y))
                 painter.drawPoint(p)
-        painter.setPen(QPen(QColor("#22c55e"), 2.4))
-        painter.drawPolyline(QPolygonF([point(float(x), float(y)) for x, y in result.ground_truth[:, :2]]))
+        if self.show_reference:
+            painter.setPen(QPen(QColor("#22c55e"), 2.4))
+            painter.drawPolyline(
+                QPolygonF([point(float(x), float(y)) for x, y in result.ground_truth[:, :2]])
+            )
         estimate_color = "#facc15" if self.occupancy_mode else "#f97316"
         painter.setPen(QPen(QColor(estimate_color), 2.4))
         painter.drawPolyline(QPolygonF([point(float(x), float(y)) for x, y in result.estimated[:, :2]]))
         painter.setPen(QColor("#e5e7eb"))
         labels = TEXT[self.language]
         painter.drawText(18, 25, f"x [{min_x:.1f}, {max_x:.1f}] m    y [{min_y:.1f}, {max_y:.1f}] m")
-        legend = [("#94a3b8", labels["world_wall"])]
-        if result.world.moving_boxes:
+        legend = [("#94a3b8", labels["world_wall"])] if self.show_reference else []
+        if result.world.moving_boxes and self.show_reference:
             legend.append(("#a855f7", labels["moving_object"]))
         if self.occupancy_mode:
             legend.extend(
@@ -668,12 +756,9 @@ class WorldCanvas(QWidget):
             )
         else:
             legend.append(("#38bdf8", labels["map_points"]))
-        legend.extend(
-            [
-                ("#22c55e", labels["truth"]),
-                (estimate_color, labels["estimate"]),
-            ]
-        )
+        if self.show_reference:
+            legend.append(("#22c55e", labels["truth"]))
+        legend.append((estimate_color, labels["estimate"]))
         legend_x = 18
         legend_y = self.height() - 15
         for color, label in legend:
@@ -703,6 +788,10 @@ class MainWindow(QMainWindow):
         self.language = "es"
         self._base_config = ExperimentConfig()
         self._last_result: RunResult | None = None
+        self._live_start: RunStarted | None = None
+        self._live_steps: list[RunStep] = []
+        self._live_follow = True
+        self._live_path = ""
         self._last_batch_path: Path | None = None
         self._worker: ExperimentWorker | None = None
         self._batch_worker: BatchWorker | None = None
@@ -710,6 +799,8 @@ class MainWindow(QMainWindow):
         self._dataset_worker: DatasetWorker | None = None
         self._last_frontier_path: Path | None = None
         self._last_dataset_path: Path | None = None
+        self._sweep_worker: SweepWorker | None = None
+        self._last_sweep_path: Path | None = None
         self._labels: dict[str, QLabel] = {}
         self._inputs: dict[str, QWidget] = {}
         self._build_ui()
@@ -748,6 +839,24 @@ class MainWindow(QMainWindow):
         outer.addLayout(toolbar)
         self.tabs = QTabWidget()
         outer.addWidget(self.tabs)
+        timeline = QHBoxLayout()
+        self.previous_button = QPushButton()
+        self.next_button = QPushButton()
+        self.step_slider = QSlider(Qt.Orientation.Horizontal)
+        self.step_slider.setRange(0, 0)
+        self.step_label = QLabel()
+        self.previous_button.clicked.connect(lambda: self.step_slider.setValue(self.step_slider.value() - 1))
+        self.next_button.clicked.connect(lambda: self.step_slider.setValue(self.step_slider.value() + 1))
+        self.step_slider.valueChanged.connect(self._show_step)
+        self.reference_checkbox = QCheckBox()
+        self.reference_checkbox.setChecked(True)
+        self.reference_checkbox.toggled.connect(self._toggle_reference)
+        timeline.addWidget(self.reference_checkbox)
+        timeline.addWidget(self.previous_button)
+        timeline.addWidget(self.step_slider, 1)
+        timeline.addWidget(self.next_button)
+        timeline.addWidget(self.step_label)
+        outer.addLayout(timeline)
 
         setup = QWidget()
         setup_outer = QVBoxLayout(setup)
@@ -784,9 +893,10 @@ class MainWindow(QMainWindow):
                     "warehouse_shelves",
                     "indoor_dynamic",
                     "outdoor_blocks",
+                    "custom",
                 ),
             ),
-            ("algorithm", ("dead_reckoning", "icp_odometry", "wheel_imu_fusion")),
+            ("algorithm", ("dead_reckoning", "icp_odometry", "wheel_imu_fusion", "adaptive_hybrid")),
             ("motion", ("constant", "sinusoidal_yaw", "stop_turn", "scripted")),
         ):
             combo = QComboBox()
@@ -794,6 +904,11 @@ class MainWindow(QMainWindow):
                 combo.addItem(value, value)
             self._add_field(form, key, combo)
         self._add_field(form, "duration", self._spin(0.1, 3600.0, 2, 1.0))
+        walls_editor = QPlainTextEdit()
+        walls_editor.setPlaceholderText("0, 0, 10, 0, 2.5\n10, 0, 10, 10, 2.5")
+        walls_editor.setMaximumHeight(105)
+        self._add_field(form, "world_segments", walls_editor)
+        self._add_field(form, "stop_at_walls", QCheckBox())
         self._add_field(form, "timestep", self._spin(0.001, 1.0, 3, 0.01))
         self._add_field(form, "speed", self._spin(-3.0, 3.0, 3, 0.05))
         self._add_field(form, "yaw_rate", self._spin(-6.0, 6.0, 3, 0.05))
@@ -861,6 +976,7 @@ class MainWindow(QMainWindow):
                 "warehouse_shelves",
                 "indoor_dynamic",
                 "outdoor_blocks",
+                "custom",
             )
         ):
             checkbox = QCheckBox()
@@ -872,7 +988,7 @@ class MainWindow(QMainWindow):
         algorithm_row = QWidget()
         algorithm_layout = QHBoxLayout(algorithm_row)
         self.batch_algorithms = {}
-        for value in ("dead_reckoning", "icp_odometry", "wheel_imu_fusion"):
+        for value in ("dead_reckoning", "icp_odometry", "wheel_imu_fusion", "adaptive_hybrid"):
             checkbox = QCheckBox()
             checkbox.setChecked(value == "dead_reckoning")
             self.batch_algorithms[value] = checkbox
@@ -989,6 +1105,72 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(dataset_page, "")
         self.occupancy_canvas = WorldCanvas(occupancy_mode=True)
         self.tabs.addTab(self.occupancy_canvas, "")
+        sweep_page = QWidget()
+        sweep_layout = QVBoxLayout(sweep_page)
+        self.sweep_hint = QLabel()
+        self.sweep_hint.setWordWrap(True)
+        sweep_layout.addWidget(self.sweep_hint)
+        sweep_form = QFormLayout()
+        self.sweep_parameter_label = QLabel()
+        self.sweep_parameter = QComboBox()
+        for name in SWEEP_PARAMETERS:
+            self.sweep_parameter.addItem(name, name)
+        self.sweep_parameter.currentIndexChanged.connect(self._update_sweep_axis_labels)
+        sweep_form.addRow(self.sweep_parameter_label, self.sweep_parameter)
+        bounds = QWidget()
+        bounds_layout = QHBoxLayout(bounds)
+        bounds_layout.setContentsMargins(0, 0, 0, 0)
+        self.sweep_min_label = QLabel()
+        self.sweep_min = self._spin(-3.0, 3.0, 3, 0.05)
+        self.sweep_min.setValue(0.0)
+        self.sweep_max_label = QLabel()
+        self.sweep_max = self._spin(-3.0, 3.0, 3, 0.05)
+        self.sweep_max.setValue(0.4)
+        self.sweep_levels_label = QLabel()
+        self.sweep_levels = QSpinBox()
+        self.sweep_levels.setRange(2, 20)
+        self.sweep_levels.setValue(5)
+        for control in (
+            self.sweep_min_label,
+            self.sweep_min,
+            self.sweep_max_label,
+            self.sweep_max,
+            self.sweep_levels_label,
+            self.sweep_levels,
+        ):
+            bounds_layout.addWidget(control)
+        sweep_form.addRow(bounds)
+        self.sweep_seeds_label = QLabel()
+        self.sweep_seeds = QLineEdit("0,1,2,3,4")
+        sweep_form.addRow(self.sweep_seeds_label, self.sweep_seeds)
+        self.sweep_metric_label = QLabel()
+        self.sweep_metric = QComboBox()
+        for metric in ("ate_rmse_m", "rpe_translation_rmse_m", "map_f1_0p25"):
+            self.sweep_metric.addItem(metric, metric)
+        self.sweep_metric.currentIndexChanged.connect(self._update_sweep_axis_labels)
+        sweep_form.addRow(self.sweep_metric_label, self.sweep_metric)
+        self.sweep_threshold_label = QLabel()
+        self.sweep_threshold = self._spin(-100.0, 100.0, 3, 0.05)
+        self.sweep_threshold.setValue(0.5)
+        sweep_form.addRow(self.sweep_threshold_label, self.sweep_threshold)
+        sweep_layout.addLayout(sweep_form)
+        self.sweep_button = QPushButton()
+        self.sweep_button.clicked.connect(self._run_sweep)
+        sweep_layout.addWidget(self.sweep_button)
+        self.sweep_status = QLabel()
+        sweep_layout.addWidget(self.sweep_status)
+        self.sweep_canvas = SweepCanvas()
+        sweep_layout.addWidget(self.sweep_canvas, 1)
+        self.sweep_table = QTableWidget(0, 4)
+        self.sweep_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.sweep_table.verticalHeader().setVisible(False)
+        self.sweep_table.setMaximumHeight(180)
+        self.sweep_table.setColumnWidth(0, 310)
+        self.sweep_table.setColumnWidth(1, 180)
+        self.sweep_table.setColumnWidth(2, 210)
+        self.sweep_table.horizontalHeader().setStretchLastSection(True)
+        sweep_layout.addWidget(self.sweep_table)
+        self.tabs.addTab(sweep_page, "")
         self.frontier_x_combo.currentIndexChanged.connect(self._update_frontier_axis_labels)
         self.frontier_y_combo.currentIndexChanged.connect(self._update_frontier_axis_labels)
         self.setStyleSheet(
@@ -1029,14 +1211,58 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(5, self._text("cloud3d"))
         self.tabs.setTabText(6, self._text("dataset"))
         self.tabs.setTabText(7, self._text("occupancy"))
+        self.tabs.setTabText(8, self._text("sweep"))
+        self.sweep_hint.setText(self._text("sweep_hint"))
+        self.sweep_parameter_label.setText(self._text("sweep_parameter"))
+        self.sweep_min_label.setText(self._text("sweep_min"))
+        self.sweep_max_label.setText(self._text("sweep_max"))
+        self.sweep_levels_label.setText(self._text("sweep_levels"))
+        self.sweep_seeds_label.setText(self._text("sweep_seeds"))
+        self.sweep_metric_label.setText(self._text("sweep_metric"))
+        self.sweep_threshold_label.setText(self._text("sweep_threshold"))
+        self.sweep_button.setText(
+            self._text(
+                "sweep_running" if self._sweep_worker and self._sweep_worker.isRunning() else "sweep_run"
+            )
+        )
+        self.sweep_canvas.empty_label = self._text("sweep_empty")
+        self.sweep_canvas.x_label = self._text(f"param_{self.sweep_parameter.currentData()}")
+        self.sweep_canvas.y_label = METRIC_LABELS[self.sweep_metric.currentData()][
+            0 if self.language == "es" else 1
+        ]
+        for index in range(self.sweep_parameter.count()):
+            self.sweep_parameter.setItemText(
+                index, self._text(f"param_{self.sweep_parameter.itemData(index)}")
+            )
+        for index in range(self.sweep_metric.count()):
+            metric = self.sweep_metric.itemData(index)
+            self.sweep_metric.setItemText(index, METRIC_LABELS[metric][0 if self.language == "es" else 1])
+        self.sweep_table.setHorizontalHeaderLabels(
+            [self._text("sweep_parameter"), self._text("batch_mean"), self._text("sweep_failure"), "n"]
+        )
+        self.sweep_canvas.update()
+        if self._last_sweep_path is not None:
+            self.sweep_status.setText(self._text("sweep_completed").format(path=self._last_sweep_path))
+        elif self._sweep_worker is None:
+            self.sweep_status.setText(self._text("sweep_empty"))
         self.cloud_hint.setText(self._text("cloud3d_hint"))
         self.cloud_canvas.empty_label = self._text("empty_cloud3d")
         self.cloud_canvas.count_label = "puntos" if self.language == "es" else "points"
-        self.cloud_canvas.legend_labels = (
-            ("Pared", "Nube", "Real", "Estimada")
+        self.cloud_canvas.floor_label = "Piso z = 0 m" if self.language == "es" else "Floor z = 0 m"
+        self.cloud_canvas.no_points_label = (
+            "Sin nube 3D: active LiDAR multicapa"
             if self.language == "es"
-            else ("Wall", "Cloud", "Truth", "Estimate")
+            else "No 3D cloud: enable multilayer LiDAR"
         )
+        self.cloud_canvas.legend_labels = (
+            ("Entorno real", "Nube estimada", "Carrito real", "Carrito estimado")
+            if self.language == "es"
+            else ("True world", "Estimated cloud", "True cart", "Estimated cart")
+        )
+        self.previous_button.setText(self._text("step_previous"))
+        self.next_button.setText(self._text("step_next"))
+        self.reference_checkbox.setText(self._text("show_reference"))
+        self._update_step_label()
         self.cloud_canvas.update()
         self.dataset_hint.setText(self._text("dataset_hint"))
         self.dataset_output_label.setText(self._text("dataset_output"))
@@ -1153,6 +1379,15 @@ class MainWindow(QMainWindow):
         self.frontier_canvas.y_label = self._text(f"param_{names[1]}")
         self.frontier_canvas.update()
 
+    def _update_sweep_axis_labels(self) -> None:
+        if not hasattr(self, "sweep_canvas"):
+            return
+        self.sweep_canvas.x_label = self._text(f"param_{self.sweep_parameter.currentData()}")
+        self.sweep_canvas.y_label = METRIC_LABELS[self.sweep_metric.currentData()][
+            0 if self.language == "es" else 1
+        ]
+        self.sweep_canvas.update()
+
     def _set_from_config(self, config: ExperimentConfig) -> None:
         self._base_config = config
         self._inputs["lidar3d_enabled"].setChecked(config.lidar3d.enabled)
@@ -1161,6 +1396,13 @@ class MainWindow(QMainWindow):
         self._inputs["occupancy_enabled"].setChecked(config.occupancy_grid.enabled)
         self._inputs["dropout_region_enabled"].setChecked(config.degradation.dropout_region_enabled)
         self._inputs["name"].setText(config.name)
+        self._inputs["world_segments"].setPlainText(
+            "\n".join(
+                f"{wall.x1:g}, {wall.y1:g}, {wall.x2:g}, {wall.y2:g}, {wall.height_m:g}"
+                for wall in config.simulation.world_segments
+            )
+        )
+        self._inputs["stop_at_walls"].setChecked(config.simulation.stop_at_walls)
         self._inputs["seed"].setValue(config.seed)
         for key, value in (
             ("world", config.simulation.world),
@@ -1192,6 +1434,22 @@ class MainWindow(QMainWindow):
                 control.setMaximum(value)
             control.setValue(value)
 
+    def _parse_walls(self) -> tuple[WallConfig, ...]:
+        walls: list[WallConfig] = []
+        for line_number, line in enumerate(
+            self._inputs["world_segments"].toPlainText().splitlines(), start=1
+        ):
+            if not line.strip():
+                continue
+            fields = [field.strip() for field in line.split(",")]
+            if len(fields) != 5:
+                raise ValueError(f"wall line {line_number}: expected x1, y1, x2, y2, height")
+            try:
+                walls.append(WallConfig(*(float(field) for field in fields)))
+            except ValueError as exc:
+                raise ValueError(f"wall line {line_number}: coordinates must be numbers") from exc
+        return tuple(walls)
+
     def current_config(self) -> ExperimentConfig:
         """Preserve advanced YAML fields while applying visible edits."""
 
@@ -1199,6 +1457,8 @@ class MainWindow(QMainWindow):
         simulation = replace(
             base.simulation,
             world=self._inputs["world"].currentData(),
+            world_segments=self._parse_walls(),
+            stop_at_walls=self._inputs["stop_at_walls"].isChecked(),
             motion_profile=self._inputs["motion"].currentData(),
             duration_s=self._inputs["duration"].value(),
             timestep_s=self._inputs["timestep"].value(),
@@ -1279,22 +1539,91 @@ class MainWindow(QMainWindow):
         self.batch_button.setEnabled(False)
         self.frontier_button.setEnabled(False)
         self.dataset_button.setEnabled(False)
+        self.sweep_button.setEnabled(False)
         self.run_button.setText(self._text("running"))
         self.statusBar().showMessage(self._text("running"))
         self._worker = ExperimentWorker(config, output_root)
+        self._worker.started_run.connect(self._on_started_run)
+        self._worker.step_ready.connect(self._on_step_ready)
         self._worker.completed.connect(self._on_completed)
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
 
+    def _on_started_run(self, started: RunStarted, path: str) -> None:
+        self._live_start = started
+        self._live_steps = []
+        self._live_follow = True
+        self._live_path = path
+        self._last_result = None
+        self.step_slider.setRange(0, 0)
+        self._show_step(0)
+        self.tabs.setCurrentIndex(5)
+        self.statusBar().showMessage(self._text("step_saved").format(path=path))
+
+    def _on_step_ready(self, step: RunStep) -> None:
+        if self._live_start is None:
+            return
+        self._live_steps.append(step)
+        follow = self._live_follow
+        self.step_slider.setMaximum(step.index)
+        if follow:
+            self.step_slider.setValue(step.index)
+
+    def _toggle_reference(self, checked: bool) -> None:
+        for canvas in (self.canvas, self.occupancy_canvas, self.cloud_canvas):
+            canvas.show_reference = checked
+            canvas.update()
+
+    def _update_step_label(self) -> None:
+        if self._live_start is None:
+            self.step_label.setText(self._text("step_empty"))
+        else:
+            index = self.step_slider.value()
+            time_s = self._live_steps[index - 1].timestamp_s if index else 0.0
+            self.step_label.setText(
+                self._text("step_label").format(index=index, total=self._live_start.total_steps, time=time_s)
+            )
+        self.previous_button.setEnabled(self.step_slider.value() > 0)
+        self.next_button.setEnabled(self.step_slider.value() < self.step_slider.maximum())
+
+    def _show_step(self, index: int) -> None:
+        if self._live_start is None:
+            self._update_step_label()
+            return
+        self._live_follow = index == self.step_slider.maximum()
+        if self._last_result is not None and index == len(self._live_steps):
+            preview: RunPreview | RunResult = self._last_result
+        else:
+            steps = self._live_steps[:index]
+            initial = self._live_start.initial_pose
+            timestamps = np.array([0.0, *(step.timestamp_s for step in steps)])
+            truth = np.vstack([initial, *(step.ground_truth for step in steps)])
+            estimate = np.vstack([initial, *(step.estimated for step in steps)])
+            points = [step.map_points_added for step in steps if len(step.map_points_added)]
+            points_3d = [step.map_points_3d_added for step in steps if len(step.map_points_3d_added)]
+            preview = RunPreview(
+                self._live_start.world,
+                timestamps,
+                truth,
+                estimate,
+                np.vstack(points) if points else np.empty((0, 2)),
+                np.vstack(points_3d) if points_3d else np.empty((0, 3)),
+                steps[-1].occupancy_grid if steps else None,
+            )
+        for canvas in (self.canvas, self.occupancy_canvas, self.cloud_canvas):
+            canvas.result = preview
+            canvas.update()
+        self._update_step_label()
+
     def _on_completed(self, result: RunResult, path: str) -> None:
         self._last_result = result
-        self.canvas.result = result
-        self.canvas.update()
-        self.occupancy_canvas.result = result
-        self.occupancy_canvas.update()
-        self.cloud_canvas.result = result
-        self.cloud_canvas.update()
+        if self._live_start is None:
+            for canvas in (self.canvas, self.occupancy_canvas, self.cloud_canvas):
+                canvas.result = result
+                canvas.update()
+        else:
+            self._show_step(self.step_slider.value())
         self._show_metrics(result)
         self.metrics_hint.setText("")
         self.tabs.setCurrentIndex(1)
@@ -1309,6 +1638,7 @@ class MainWindow(QMainWindow):
         self.batch_button.setEnabled(True)
         self.frontier_button.setEnabled(True)
         self.dataset_button.setEnabled(True)
+        self.sweep_button.setEnabled(True)
         self.run_button.setText(self._text("run"))
         self._worker = None
 
@@ -1334,6 +1664,7 @@ class MainWindow(QMainWindow):
         self.batch_button.setEnabled(False)
         self.frontier_button.setEnabled(False)
         self.dataset_button.setEnabled(False)
+        self.sweep_button.setEnabled(False)
         self.batch_button.setText(self._text("batch_running"))
         self.batch_status.setText(self._text("batch_running"))
         self._batch_worker = BatchWorker(config, seeds, algorithms, worlds, output_root)
@@ -1372,6 +1703,7 @@ class MainWindow(QMainWindow):
         self.batch_button.setEnabled(True)
         self.frontier_button.setEnabled(True)
         self.dataset_button.setEnabled(True)
+        self.sweep_button.setEnabled(True)
         self.batch_button.setText(self._text("batch_run"))
         self._batch_worker = None
 
@@ -1417,6 +1749,7 @@ class MainWindow(QMainWindow):
         self.batch_button.setEnabled(False)
         self.frontier_button.setEnabled(False)
         self.dataset_button.setEnabled(False)
+        self.sweep_button.setEnabled(False)
         self.frontier_button.setText(self._text("frontier_running"))
         self.frontier_status.setText(self._text("frontier_running"))
         self._frontier_worker = FrontierWorker(
@@ -1456,6 +1789,7 @@ class MainWindow(QMainWindow):
         self.batch_button.setEnabled(True)
         self.frontier_button.setEnabled(True)
         self.dataset_button.setEnabled(True)
+        self.sweep_button.setEnabled(True)
         self.frontier_button.setText(self._text("frontier_run"))
         self._frontier_worker = None
 
@@ -1474,6 +1808,7 @@ class MainWindow(QMainWindow):
         self.batch_button.setEnabled(False)
         self.frontier_button.setEnabled(False)
         self.dataset_button.setEnabled(False)
+        self.sweep_button.setEnabled(False)
         self.dataset_button.setText(self._text("dataset_running"))
         self.dataset_status.setText(self._text("dataset_running"))
         self._dataset_worker = DatasetWorker(config, output_root)
@@ -1513,8 +1848,93 @@ class MainWindow(QMainWindow):
         self.batch_button.setEnabled(True)
         self.frontier_button.setEnabled(True)
         self.dataset_button.setEnabled(True)
+        self.sweep_button.setEnabled(True)
         self.dataset_button.setText(self._text("dataset_run"))
         self._dataset_worker = None
+
+    def _run_sweep(self) -> None:
+        try:
+            config = self.current_config()
+            low, high = self.sweep_min.value(), self.sweep_max.value()
+            if low >= high:
+                raise ValueError("study maximum must exceed its minimum")
+            parameter = self.sweep_parameter.currentData()
+            if parameter.endswith("probability") and not 0.0 <= low < high <= 1.0:
+                raise ValueError("a probability study must stay within [0, 1]")
+            if "noise_std" in parameter and low < 0.0:
+                raise ValueError("noise standard deviations must be nonnegative")
+            levels = tuple(float(value) for value in np.linspace(low, high, self.sweep_levels.value()))
+            seeds = tuple(int(value.strip()) for value in self.sweep_seeds.text().split(","))
+            if len(seeds) < 2 or len(set(seeds)) != len(seeds) or any(seed < 0 for seed in seeds):
+                raise ValueError("study requires at least two unique nonnegative seeds")
+            output_text = self._inputs["output"].text().strip()
+            if not output_text:
+                raise ValueError("empty output folder")
+            output_root = Path(output_text)
+        except Exception as exc:
+            self._show_error(str(exc))
+            return
+        for button in (
+            self.run_button,
+            self.save_button,
+            self.batch_button,
+            self.frontier_button,
+            self.dataset_button,
+            self.sweep_button,
+        ):
+            button.setEnabled(False)
+        self.sweep_button.setText(self._text("sweep_running"))
+        self.sweep_status.setText(self._text("sweep_running"))
+        self._sweep_worker = SweepWorker(
+            config,
+            parameter,
+            levels,
+            seeds,
+            self.sweep_metric.currentData(),
+            self.sweep_threshold.value(),
+            output_root,
+        )
+        self._sweep_worker.completed.connect(self._on_sweep_completed)
+        self._sweep_worker.failed.connect(self._on_failed)
+        self._sweep_worker.finished.connect(self._on_sweep_finished)
+        self._sweep_worker.start()
+
+    def _on_sweep_completed(self, study, path: str) -> None:
+        self._last_sweep_path = Path(path)
+        self.sweep_canvas.study = study
+        self.sweep_canvas.x_label = self._text(f"param_{study.parameter_name}")
+        self.sweep_canvas.y_label = METRIC_LABELS[study.metric_name][0 if self.language == "es" else 1]
+        self.sweep_canvas.update()
+        self.sweep_table.setRowCount(len(study.summary))
+        for index, row in enumerate(study.summary):
+            for column, value in enumerate(
+                (
+                    f"{row['level']:.4g}",
+                    f"{row['mean']:.5g}",
+                    f"{row['failure_fraction']:.2f}",
+                    str(row["count"]),
+                )
+            ):
+                self.sweep_table.setItem(index, column, QTableWidgetItem(value))
+        self.tabs.setCurrentIndex(8)
+        if not self.sweep_canvas.grab().save(str(self._last_sweep_path / "study_curve_gui.png")):
+            self._show_error("could not save study curve image")
+        message = self._text("sweep_completed").format(path=path)
+        self.sweep_status.setText(message)
+        self.statusBar().showMessage(message)
+
+    def _on_sweep_finished(self) -> None:
+        for button in (
+            self.run_button,
+            self.save_button,
+            self.batch_button,
+            self.frontier_button,
+            self.dataset_button,
+            self.sweep_button,
+        ):
+            button.setEnabled(True)
+        self.sweep_button.setText(self._text("sweep_run"))
+        self._sweep_worker = None
 
     def _on_dataset_failed(self, detail: str) -> None:
         self.dataset_status.setText(detail)
@@ -1538,6 +1958,7 @@ class MainWindow(QMainWindow):
             or (self._batch_worker is not None and self._batch_worker.isRunning())
             or (self._frontier_worker is not None and self._frontier_worker.isRunning())
             or (self._dataset_worker is not None and self._dataset_worker.isRunning())
+            or (self._sweep_worker is not None and self._sweep_worker.isRunning())
         ):
             self.statusBar().showMessage(self._text("wait_for_run"))
             event.ignore()
@@ -1548,6 +1969,7 @@ class MainWindow(QMainWindow):
 def main() -> int:
     """Start the desktop interface without changing the headless API."""
 
+    configure_local_runtime()
     application = QApplication(sys.argv)
     application.setStyle("Fusion")
     application.setFont(QFont("Segoe UI", 10))
@@ -1557,6 +1979,7 @@ def main() -> int:
 
         from PIL import Image
 
+        from slamcart3d.experiments.sweep import run_parameter_sweep
         from slamcart3d.simulation.observations import ObservationStream
 
         config = ExperimentConfig.load(bundled_example_path())
@@ -1565,6 +1988,10 @@ def main() -> int:
             simulation=replace(config.simulation, duration_s=0.2, timestep_s=0.1),
         )
         result = run_simulation(config)
+        hybrid_result = run_simulation(
+            replace(config, slam=replace(config.slam, algorithm="adaptive_hybrid"))
+        )
+        sweep = run_parameter_sweep(config, "wheel_rate_noise_std_rad_s", (0.0, 0.1), (0, 1))
         cloud_config = replace(
             config,
             lidar3d=replace(config.lidar3d, enabled=True, azimuth_beams=3, elevation_beams=3),
@@ -1595,7 +2022,10 @@ def main() -> int:
         if (
             len(source_sha256()) != 64
             or window.metrics_table.rowCount() == 0
-            or window.tabs.count() != 8
+            or window.tabs.count() != 9
+            or not math.isfinite(hybrid_result.metrics["ate_rmse_m"])
+            or len(hybrid_result.map_points) == 0
+            or len(sweep.runs) != 4
             or len(cloud_result.map_points_3d) == 0
             or not png_buffer.getvalue().startswith(b"\x89PNG")
             or len(batch.runs) != 1

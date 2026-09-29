@@ -2,9 +2,31 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Callable
+
+
+def configure_local_runtime() -> Path:
+    """Keep runtime caches and temporary data beside the application or checkout."""
+
+    root = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path.cwd()
+    runtime = root / ".runtime"
+    locations = {
+        "TEMP": runtime / "temp",
+        "TMP": runtime / "temp",
+        "TMPDIR": runtime / "temp",
+        "APPDATA": runtime / "appdata",
+        "LOCALAPPDATA": runtime / "localappdata",
+        "XDG_CACHE_HOME": runtime / "cache",
+        "XDG_CONFIG_HOME": runtime / "config",
+        "MPLCONFIGDIR": runtime / "matplotlib",
+    }
+    for path in set(locations.values()):
+        path.mkdir(parents=True, exist_ok=True)
+    os.environ.update({name: str(path) for name, path in locations.items()})
+    return runtime
 
 
 def bundled_example_path() -> str:

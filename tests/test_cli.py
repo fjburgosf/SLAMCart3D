@@ -67,3 +67,53 @@ def test_cli_batch_and_frontier_exports(tmp_path) -> None:
         == 0
     )
     assert len(list(root.glob("ROBUSTNESS-*/robustness_map.csv"))) == 1
+
+
+def test_cli_controlled_sweep_exports(tmp_path) -> None:
+    config = _short_config(tmp_path)
+    root = tmp_path / "results"
+    assert (
+        main(
+            [
+                "sweep",
+                str(config),
+                "--parameter",
+                "lidar_noise_std_m",
+                "--min",
+                "0",
+                "--max",
+                "0.2",
+                "--levels",
+                "2",
+                "--seeds",
+                "0,1",
+                "--output",
+                str(root),
+            ]
+        )
+        == 0
+    )
+    assert len(list(root.glob("SWEEP-*/summary.csv"))) == 1
+
+
+def test_cli_hybrid_benchmark_exports(tmp_path) -> None:
+    config = _short_config(tmp_path)
+    root = tmp_path / "results"
+    assert (
+        main(
+            [
+                "benchmark-hybrid",
+                str(config),
+                "--seeds",
+                "5,6",
+                "--scenarios",
+                "moderate",
+                "--methods",
+                "dead_reckoning,adaptive_hybrid",
+                "--output",
+                str(root),
+            ]
+        )
+        == 0
+    )
+    assert len(list(root.glob("HYBRID-*/paired_effects.csv"))) == 1

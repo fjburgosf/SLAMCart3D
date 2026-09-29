@@ -1,0 +1,21 @@
+experiment:
+  name: example_adaptive_hybrid
+  seed: 42
+  lidar:
+    beam_count: 90
+  degradation:
+    lidar_noise_std_m: 0.05
+    lidar_dropout_probability: 0.05
+    wheel_rate_noise_std_rad_s: 0.03
+  simulation:
+    duration_s: 10.0
+    timestep_s: 0.1
+    world: indoor_simple
+  slam:
+    algorithm: adaptive_hybrid
+    icp_max_iterations: 8
+    icp_max_correspondence_m: 0.6
+    icp_prior_weight: 20.0
+    hybrid_use_imu: true
+    hybrid_adaptive_trust: true
+    hybrid_gate_map: true

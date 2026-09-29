@@ -9,20 +9,112 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from slamcart3d.core.provenance import source_sha256
 from slamcart3d.metrics.map_quality import MAP_MATCH_TOLERANCE_M, WALL_SAMPLE_SPACING_M
 from slamcart3d.metrics.map_quality_3d import (
     GROUND_EXCLUSION_HEIGHT_M,
     WALL_3D_MATCH_TOLERANCE_M,
     WALL_SURFACE_SAMPLE_SPACING_M,
 )
-from slamcart3d.simulation.runner import RunResult
+from slamcart3d.simulation.runner import RunResult, RunStarted, RunStep
 
 
-def export_result(result: RunResult, output_root: str | Path = "results") -> Path:
+class IncrementalRunWriter:
+    """Keep each observed step on disk, even if a later step fails."""
+
+    def __init__(self, started: RunStarted, output_root: str | Path) -> None:
+        self.target = Path(output_root) / started.experiment_id
+        self.target.mkdir(parents=True, exist_ok=False)
+        self.started = started
+        self._source_hash = source_sha256()
+        self.completed_steps = 0
+        self._last_timestamp_s = 0.0
+        self._state = "running"
+        self._error: str | None = None
+        (self.target / "config.yaml").write_text(
+            yaml.safe_dump({"experiment": started.config.to_dict()}, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        self._trajectory_file = (self.target / "trajectory_live.csv").open("x", encoding="utf-8", newline="")
+        self._map_file = (self.target / "point_cloud_live.csv").open("x", encoding="utf-8", newline="")
+        self._cloud_file = (
+            (self.target / "point_cloud_3d_live.csv").open("x", encoding="utf-8", newline="")
+            if started.config.lidar3d.enabled
+            else None
+        )
+        self._trajectory = csv.writer(self._trajectory_file)
+        self._map = csv.writer(self._map_file)
+        self._cloud = csv.writer(self._cloud_file) if self._cloud_file is not None else None
+        self._trajectory.writerow(
+            ["step", "timestamp_s", "gt_x_m", "gt_y_m", "gt_yaw_rad", "est_x_m", "est_y_m", "est_yaw_rad"]
+        )
+        self._map.writerow(["step", "x_m", "y_m"])
+        if self._cloud is not None:
+            self._cloud.writerow(["step", "x_m", "y_m", "z_m"])
+        self._flush()
+        self._write_status()
+
+    def _flush(self) -> None:
+        self._trajectory_file.flush()
+        self._map_file.flush()
+        if self._cloud_file is not None:
+            self._cloud_file.flush()
+
+    def _write_status(self) -> None:
+        content = {
+            "experiment_id": self.started.experiment_id,
+            "created_utc": self.started.created_utc,
+            "source_sha256": self._source_hash,
+            "state": self._state,
+            "completed_steps": self.completed_steps,
+            "total_steps": self.started.total_steps,
+            "last_timestamp_s": self._last_timestamp_s,
+        }
+        if self._error is not None:
+            content["error"] = self._error
+        temporary = self.target / "status.json.tmp"
+        temporary.write_text(json.dumps(content, indent=2, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(self.target / "status.json")
+
+    def append(self, step: RunStep) -> None:
+        if self._state != "running" or step.index != self.completed_steps + 1:
+            raise ValueError("incremental steps must be written exactly once and in order")
+        self._trajectory.writerow([step.index, step.timestamp_s, *step.ground_truth, *step.estimated])
+        self._map.writerows([step.index, *point] for point in step.map_points_added)
+        if self._cloud is not None:
+            self._cloud.writerows([step.index, *point] for point in step.map_points_3d_added)
+        self._flush()
+        self.completed_steps = step.index
+        self._last_timestamp_s = step.timestamp_s
+        self._write_status()
+
+    def close(self) -> None:
+        self._trajectory_file.close()
+        self._map_file.close()
+        if self._cloud_file is not None:
+            self._cloud_file.close()
+
+    def complete(self) -> None:
+        self._state = "complete"
+        self._write_status()
+
+    def fail(self, error: str) -> None:
+        self._state = "failed"
+        self._error = error
+        self._write_status()
+
+
+def export_result(
+    result: RunResult, output_root: str | Path = "results", *, reuse_existing: bool = False
+) -> Path:
     """Write one self-contained result directory and return its path."""
 
     target = Path(output_root) / result.experiment_id
-    target.mkdir(parents=True, exist_ok=False)
+    if reuse_existing:
+        if not target.is_dir() or (target / "metadata.json").exists():
+            raise FileExistsError("expected an unfinished incremental result directory")
+    else:
+        target.mkdir(parents=True, exist_ok=False)
     (target / "figures").mkdir()
     (target / "map").mkdir()
     with (target / "config.yaml").open("w", encoding="utf-8", newline="\n") as stream:

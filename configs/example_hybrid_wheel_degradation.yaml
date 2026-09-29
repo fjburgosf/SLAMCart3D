@@ -1,0 +1,18 @@
+experiment:
+  name: example_hybrid_wheel_degradation
+  seed: 42
+  lidar:
+    beam_count: 90
+  degradation:
+    lidar_noise_std_m: 0.02
+    wheel_rate_noise_std_rad_s: 0.5
+    imu_gyro_noise_std_rad_s: 0.01
+  simulation:
+    duration_s: 10.0
+    timestep_s: 0.1
+    world: indoor_simple
+  slam:
+    algorithm: adaptive_hybrid
+    icp_max_iterations: 8
+    icp_max_correspondence_m: 0.6
+    icp_prior_weight: 20.0

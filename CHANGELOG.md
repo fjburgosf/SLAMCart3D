@@ -2,6 +2,12 @@
 
 ## 0.1.0
 
+- Added a proposed adaptive wheel/IMU and LiDAR scan-to-map estimator with online reliability adjustment and map gating.
+- Added a paired four-condition comparison of SLAM references and hybrid ablations, retaining all run data and descriptive contrasts.
+- Added controlled one-variable sweeps to the CLI and bilingual desktop interface, with response curves and per-seed exports.
+- Added live step-by-step visualization, timeline review, reference visibility control, and incremental result saving.
+- Added editable finite-height wall scenes, an explicit gridded floor, oriented cart displays, and default stopping at static walls.
+- Expanded desktop self-tests to the current nine tabs and new estimator/study paths; runtime caches now stay beside the application.
 - Added the reproducible headless vertical slice.
 - Added the first ASRF probabilistic-frontier implementation and synthetic validation.
 - Added Grid/Random/LHS comparisons, ASRF ablations, repeated-seed statistics, and real-simulation robustness maps.

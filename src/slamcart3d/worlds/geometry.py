@@ -54,6 +54,47 @@ class World3D:
             segment for moving in self.moving_boxes for segment in moving.segments_at(timestamp_s)
         )
 
+    def path_clearance_m(
+        self, start: tuple[float, float], end: tuple[float, float], timestamp_s: float
+    ) -> float:
+        """Minimum planar distance from a straight path chord to any wall."""
+
+        path_a = np.asarray(start, dtype=float)
+        path_b = np.asarray(end, dtype=float)
+
+        def point_segment_distance(point: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
+            direction = b - a
+            length_sq = float(np.dot(direction, direction))
+            fraction = (
+                float(np.clip(np.dot(point - a, direction) / length_sq, 0.0, 1.0)) if length_sq else 0.0
+            )
+            return float(np.linalg.norm(point - a - fraction * direction))
+
+        def cross(a: np.ndarray, b: np.ndarray) -> float:
+            return float(a[0] * b[1] - a[1] * b[0])
+
+        nearest = math.inf
+        for wall in self.segments_at(timestamp_s):
+            wall_a = np.array([wall.x1, wall.y1])
+            wall_b = np.array([wall.x2, wall.y2])
+            path_direction = path_b - path_a
+            wall_direction = wall_b - wall_a
+            denominator = cross(path_direction, wall_direction)
+            if abs(denominator) > 1e-12:
+                offset = wall_a - path_a
+                path_fraction = cross(offset, wall_direction) / denominator
+                wall_fraction = cross(offset, path_direction) / denominator
+                if 0.0 <= path_fraction <= 1.0 and 0.0 <= wall_fraction <= 1.0:
+                    return 0.0
+            nearest = min(
+                nearest,
+                point_segment_distance(path_a, wall_a, wall_b),
+                point_segment_distance(path_b, wall_a, wall_b),
+                point_segment_distance(wall_a, path_a, path_b),
+                point_segment_distance(wall_b, path_a, path_b),
+            )
+        return nearest
+
     def ray_distance(
         self, x: float, y: float, angle_rad: float, max_range_m: float, timestamp_s: float = 0.0
     ) -> float:

@@ -113,6 +113,17 @@ class MotionSegment:
 
 
 @dataclass(frozen=True)
+class WallConfig:
+    """One finite-height wall in a configurable three-dimensional scene."""
+
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    height_m: float = 2.5
+
+
+@dataclass(frozen=True)
 class SimulationConfig:
     """Time integration and commanded motion settings."""
 
@@ -124,6 +135,8 @@ class SimulationConfig:
     motion_frequency_hz: float = 0.1
     motion_segments: tuple[MotionSegment, ...] = ()
     world: str = "indoor_simple"
+    world_segments: tuple[WallConfig, ...] = ()
+    stop_at_walls: bool = True
 
 
 @dataclass(frozen=True)
@@ -134,6 +147,9 @@ class SLAMConfig:
     icp_max_iterations: int = 15
     icp_max_correspondence_m: float = 0.6
     icp_prior_weight: float = 20.0
+    hybrid_use_imu: bool = True
+    hybrid_adaptive_trust: bool = True
+    hybrid_gate_map: bool = True
 
 
 @dataclass(frozen=True)
@@ -180,6 +196,8 @@ class ExperimentConfig:
     def __post_init__(self) -> None:
         if any(not isinstance(segment, MotionSegment) for segment in self.simulation.motion_segments):
             raise ValueError("motion_segments must contain MotionSegment values")
+        if any(not isinstance(wall, WallConfig) for wall in self.simulation.world_segments):
+            raise ValueError("world_segments must contain WallConfig values")
         numeric_values = (
             self.robot.wheel_radius_m,
             self.robot.wheel_base_m,
@@ -217,6 +235,11 @@ class ExperimentConfig:
             self.slam.icp_prior_weight,
             self.occupancy_grid.resolution_m,
             *(value for name, value in self.robustness_score.__dict__.items() if name != "enabled"),
+            *(
+                value
+                for wall in self.simulation.world_segments
+                for value in (wall.x1, wall.y1, wall.x2, wall.y2, wall.height_m)
+            ),
         )
         if any(not math.isfinite(value) for value in numeric_values):
             raise ValueError("configuration values must be finite")
@@ -224,6 +247,13 @@ class ExperimentConfig:
             raise ValueError("duration_s and timestep_s must be positive")
         if self.simulation.motion_profile not in {"constant", "sinusoidal_yaw", "stop_turn", "scripted"}:
             raise ValueError(f"unsupported motion profile: {self.simulation.motion_profile}")
+        if self.simulation.world == "custom" and not self.simulation.world_segments:
+            raise ValueError("custom world requires at least one wall segment")
+        if any(
+            wall.height_m <= 0.0 or (wall.x1 == wall.x2 and wall.y1 == wall.y2)
+            for wall in self.simulation.world_segments
+        ):
+            raise ValueError("wall segments require positive height and distinct endpoints")
         if self.simulation.motion_frequency_hz <= 0.0:
             raise ValueError("motion_frequency_hz must be positive")
         steps = self.simulation.duration_s / self.simulation.timestep_s
@@ -274,7 +304,12 @@ class ExperimentConfig:
             raise ValueError("camera height and range must be positive")
         if self.imu.gyro_saturation_rad_s <= 0.0 or self.imu.accel_saturation_m_s2 <= 0.0:
             raise ValueError("IMU saturation limits must be positive")
-        if self.slam.algorithm not in {"dead_reckoning", "icp_odometry", "wheel_imu_fusion"}:
+        if self.slam.algorithm not in {
+            "dead_reckoning",
+            "icp_odometry",
+            "wheel_imu_fusion",
+            "adaptive_hybrid",
+        }:
             raise ValueError(f"unsupported SLAM algorithm: {self.slam.algorithm}")
         if self.slam.algorithm == "wheel_imu_fusion" and not self.imu.enabled:
             raise ValueError("wheel_imu_fusion requires an enabled IMU")
@@ -363,6 +398,11 @@ class ExperimentConfig:
             ):
                 raise ValueError("motion_segments must be a sequence of mappings")
             simulation_data["motion_segments"] = tuple(MotionSegment(**item) for item in segments)
+        if "world_segments" in simulation_data:
+            walls = simulation_data["world_segments"]
+            if not isinstance(walls, (list, tuple)) or any(not isinstance(item, dict) for item in walls):
+                raise ValueError("world_segments must be a sequence of mappings")
+            simulation_data["world_segments"] = tuple(WallConfig(**item) for item in walls)
         return cls(
             name=data.get("name", cls.name),
             seed=int(data.get("seed", cls.seed)),

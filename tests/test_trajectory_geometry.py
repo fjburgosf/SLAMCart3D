@@ -45,6 +45,7 @@ def test_complex_world_flags_curved_wall_crossing_but_not_corridor_path() -> Non
             world="indoor_complex",
             linear_velocity_m_s=0.35,
             yaw_rate_rad_s=0.18,
+            stop_at_walls=False,
         ),
     )
     assert run_simulation(curved).metrics["ground_truth_static_wall_contact_steps"] > 0.0
