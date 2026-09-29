@@ -12,7 +12,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from slamcart3d.core.config import (
     ExperimentConfig,
@@ -347,4 +347,82 @@ def test_srs_gui_requires_opt_in_and_displays_component_metrics(application, tmp
     window.language_combo.setCurrentIndex(1)
     labels_en = [window.metrics_table.item(row, 0).text() for row in range(window.metrics_table.rowCount())]
     assert "SRS robustness index [0–1]" in labels_en
+    window.close()
+
+
+def test_each_action_button_works_through_a_mouse_click(application, monkeypatch, tmp_path) -> None:
+    """Exercise the six visible actions, including both file dialogs, as a user would."""
+
+    window = MainWindow()
+    window.resize(1400, 900)
+    window.show()
+    errors: list[str] = []
+    window._show_error = errors.append
+    example = Path(__file__).resolve().parents[1] / "configs" / "example_multilayer_lidar.yaml"
+    saved = tmp_path / "saved_config.yaml"
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(example), ""))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args: (str(saved), ""))
+
+    def click(button) -> None:
+        assert button.isVisible() and button.isEnabled(), button.text()
+        QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+        application.processEvents()
+
+    def wait_until_done(attribute: str, seconds: float = 20.0) -> None:
+        deadline = time.monotonic() + seconds
+        while getattr(window, attribute) is not None and time.monotonic() < deadline:
+            application.processEvents()
+            QTest.qWait(10)
+        assert getattr(window, attribute) is None, attribute
+
+    click(window.browse_button)
+    assert window.config_path.text() == str(example)
+    click(window.load_button)
+    assert window.current_config().lidar3d.enabled
+    short = window.current_config()
+    short = replace(
+        short,
+        lidar=replace(short.lidar, beam_count=8),
+        lidar3d=replace(short.lidar3d, azimuth_beams=3, elevation_beams=3),
+        camera=replace(short.camera, enabled=True, width_px=8, height_px=6),
+        simulation=replace(short.simulation, duration_s=0.2),
+    )
+    window._set_from_config(short)
+    window._inputs["output"].setText(str(tmp_path / "results"))
+    window.dataset_output.setText(str(tmp_path / "datasets"))
+
+    click(window.save_button)
+    assert saved.is_file()
+    assert ExperimentConfig.load(saved).lidar3d.enabled
+    click(window.load_button)
+    assert window.current_config().camera.enabled
+
+    click(window.run_button)
+    wait_until_done("_worker")
+    assert window._last_result is not None
+    assert window.canvas.result is window._last_result
+    assert window.cloud_canvas.result is window._last_result
+    assert window.metrics_table.rowCount() > 0
+
+    window.tabs.setCurrentIndex(3)
+    window.batch_seeds.setText("0,1")
+    click(window.batch_button)
+    wait_until_done("_batch_worker")
+    assert window._last_batch_path is not None
+    assert window.batch_table.rowCount() > 0
+
+    window.tabs.setCurrentIndex(4)
+    window.frontier_seeds.setText("0")
+    window.frontier_budget.setValue(9)
+    click(window.frontier_button)
+    wait_until_done("_frontier_worker")
+    assert window._last_frontier_path is not None
+    assert window.frontier_canvas.study is not None
+
+    window.tabs.setCurrentIndex(6)
+    click(window.dataset_button)
+    wait_until_done("_dataset_worker")
+    assert window._last_dataset_path is not None
+    assert window.camera_preview.pixmap() is not None
+    assert errors == []
     window.close()
