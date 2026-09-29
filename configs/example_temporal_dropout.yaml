@@ -1,0 +1,16 @@
+experiment:
+  name: example_temporal_dropout
+  seed: 42
+  lidar:
+    beam_count: 24
+  degradation:
+    lidar_dropout_probability: 0.8
+    odometry_dropout_probability: 0.5
+    imu_dropout_probability: 0.4
+    dropout_time_profile: linear_ramp
+  simulation:
+    duration_s: 4.0
+    timestep_s: 0.1
+    world: indoor_simple
+  slam:
+    algorithm: wheel_imu_fusion

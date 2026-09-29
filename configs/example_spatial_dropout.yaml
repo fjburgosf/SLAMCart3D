@@ -1,0 +1,20 @@
+experiment:
+  name: example_spatial_dropout
+  seed: 42
+  lidar:
+    beam_count: 24
+  degradation:
+    lidar_dropout_probability: 0.9
+    odometry_dropout_probability: 0.7
+    imu_dropout_probability: 0.5
+    dropout_region_enabled: true
+    dropout_region_x_min_m: 5.5
+    dropout_region_x_max_m: 6.2
+    dropout_region_y_min_m: 3.5
+    dropout_region_y_max_m: 5.5
+  simulation:
+    duration_s: 4.0
+    timestep_s: 0.1
+    world: indoor_simple
+  slam:
+    algorithm: wheel_imu_fusion

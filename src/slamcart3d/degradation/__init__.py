@@ -1,0 +1,1 @@
+"""Controlled sensor degradation."""

@@ -1,0 +1,21 @@
+experiment:
+  name: example_multilayer_lidar
+  seed: 42
+  lidar:
+    beam_count: 24
+  lidar3d:
+    enabled: true
+    azimuth_beams: 36
+    elevation_beams: 5
+    horizontal_fov_deg: 270.0
+    vertical_fov_deg: 40.0
+    sensor_height_m: 0.5
+    max_range_m: 12.0
+  degradation:
+    lidar_noise_std_m: 0.02
+  simulation:
+    duration_s: 4.0
+    timestep_s: 0.1
+    world: indoor_simple
+  slam:
+    algorithm: dead_reckoning

@@ -1,0 +1,32 @@
+experiment:
+  name: example_07_asrf
+  seed: 42
+  robot:
+    wheel_radius_m: 0.1
+    wheel_base_m: 0.5
+    initial_x_m: 5.0
+    initial_y_m: 4.0
+    initial_yaw_rad: 0.0
+  lidar:
+    beam_count: 24
+    field_of_view_deg: 270.0
+    max_range_m: 12.0
+  degradation:
+    lidar_noise_std_m: 0.02
+    lidar_bias_m: 0.0
+    lidar_dropout_probability: 0.0
+    lidar_outlier_probability: 0.0
+    wheel_rate_noise_std_rad_s: 0.01
+    wheel_rate_bias_rad_s: 0.0
+    odometry_dropout_probability: 0.0
+  simulation:
+    duration_s: 4.0
+    timestep_s: 0.1
+    linear_velocity_m_s: 0.4
+    yaw_rate_rad_s: 0.2
+    world: indoor_simple
+  slam:
+    algorithm: dead_reckoning
+    icp_max_iterations: 15
+    icp_max_correspondence_m: 0.6
+    icp_prior_weight: 20.0

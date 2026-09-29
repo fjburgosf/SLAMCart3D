@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use SLAMCart3D, cite the software using this metadata."
+title: "SLAMCart3D"
+type: software
+version: 0.1.0
+authors:
+  - family-names: "Burgos Flórez"
+    given-names: "Francisco Javier"
+  - family-names: "Hoyos Sánchez"
+    given-names: "Juan Pablo"
+  - family-names: "Popayán Hernández"
+    given-names: "Juan Guillermo"

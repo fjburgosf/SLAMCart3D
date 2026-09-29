@@ -1,0 +1,24 @@
+experiment:
+  name: example_srs
+  seed: 42
+  lidar:
+    beam_count: 24
+  simulation:
+    duration_s: 4.0
+    timestep_s: 0.1
+    world: indoor_simple
+  degradation:
+    lidar_noise_std_m: 0.03
+    wheel_rate_noise_std_rad_s: 0.03
+  slam:
+    algorithm: wheel_imu_fusion
+  robustness_score:
+    enabled: true
+    ate_half_quality_m: 0.1
+    rpe_translation_half_quality_m: 0.05
+    map_f1_floor: 0.5
+    tracking_availability_floor: 0.9
+    ate_weight: 1.0
+    rpe_translation_weight: 1.0
+    map_f1_weight: 1.0
+    tracking_availability_weight: 1.0

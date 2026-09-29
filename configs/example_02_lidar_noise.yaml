@@ -1,0 +1,18 @@
+experiment:
+  name: example_02_lidar_noise
+  seed: 42
+  lidar:
+    beam_count: 90
+    field_of_view_deg: 270.0
+    max_range_m: 12.0
+  degradation:
+    lidar_noise_std_m: 0.15
+    wheel_rate_noise_std_rad_s: 0.01
+  simulation:
+    duration_s: 20.0
+    timestep_s: 0.1
+    linear_velocity_m_s: 0.4
+    yaw_rate_rad_s: 0.2
+    world: indoor_simple
+  slam:
+    algorithm: icp_odometry

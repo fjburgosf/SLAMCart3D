@@ -1,0 +1,24 @@
+experiment:
+  name: example_03_imu_drift
+  seed: 42
+  imu:
+    enabled: true
+    gyro_saturation_rad_s: 6.0
+    accel_saturation_m_s2: 20.0
+  degradation:
+    lidar_noise_std_m: 0.02
+    wheel_rate_noise_std_rad_s: 0.01
+    imu_gyro_bias_rad_s: 0.03
+    imu_gyro_noise_std_rad_s: 0.005
+    imu_gyro_random_walk_std_rad_s_sqrt_s: 0.003
+    imu_accel_bias_m_s2: 0.05
+    imu_accel_noise_std_m_s2: 0.02
+    imu_accel_random_walk_std_m_s2_sqrt_s: 0.005
+  simulation:
+    duration_s: 20.0
+    timestep_s: 0.1
+    linear_velocity_m_s: 0.4
+    yaw_rate_rad_s: 0.2
+    world: indoor_simple
+  slam:
+    algorithm: wheel_imu_fusion

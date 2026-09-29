@@ -1,0 +1,26 @@
+experiment:
+  name: example_scripted_trajectory
+  seed: 42
+  simulation:
+    duration_s: 4.0
+    timestep_s: 0.1
+    world: indoor_simple
+    motion_profile: scripted
+    motion_segments:
+      - duration_s: 1.0
+        linear_velocity_m_s: 0.4
+        yaw_rate_rad_s: 0.0
+      - duration_s: 1.0
+        linear_velocity_m_s: 0.0
+        yaw_rate_rad_s: 1.5707963267948966
+      - duration_s: 1.0
+        linear_velocity_m_s: 0.4
+        yaw_rate_rad_s: 0.0
+      - duration_s: 1.0
+        linear_velocity_m_s: 0.0
+        yaw_rate_rad_s: -1.5707963267948966
+  degradation:
+    lidar_noise_std_m: 0.0
+    wheel_rate_noise_std_rad_s: 0.0
+  slam:
+    algorithm: dead_reckoning

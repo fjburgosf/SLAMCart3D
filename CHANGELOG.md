@@ -1,0 +1,55 @@
+# Changelog
+
+## 0.1.0
+
+- Added the reproducible headless vertical slice.
+- Added the first ASRF probabilistic-frontier implementation and synthetic validation.
+- Added Grid/Random/LHS comparisons, ASRF ablations, repeated-seed statistics, and real-simulation robustness maps.
+- Added deterministic tests for kinematics, sensing, degradation, metrics, export, and ASRF.
+- Added a configurable scan-to-scan ICP LiDAR-odometry baseline.
+- Stabilized ICP with point-to-line registration and an odometry prior.
+- Added standalone synthetic dataset export and configurable ASRF study axes.
+- Added an approximate ASRF uncertainty map and a 3D view of the extruded world.
+- Added repeated known-frontier validation over budgets and design seeds.
+- Added two reproducible 2.5D geometries for cross-environment experiments.
+- Added planar IMU simulation with reproducible gyro/accelerometer bias, random walk, white noise, saturation, and dropout.
+- Added wheel/IMU yaw-fusion odometry baseline and optional IMU dataset export.
+- Added deterministic constant, sinusoidal-yaw, and stop/turn motion profiles.
+- Added motion variables as ASRF axes and 2D point-map accuracy/completeness metrics.
+- Made ASRF failure thresholds respect whether a metric is better high or low.
+- Added reproducible multi-world, multi-algorithm, multi-seed batches with configurable process workers and full per-run export.
+- Added LiDAR effective-range reduction and robot-frame sector dropout.
+- Added explicit ICP registration availability separate from finite-pose availability.
+- Added an optional bilingual Qt interface for real single-run experiments, trajectory/map inspection, and metric review.
+- Added a deterministic moving indoor object and time-aware LiDAR ray casting; 3D figures now derive their bounds from each world.
+- Added a sparse open outdoor world with seeded building footprints and no-hit LiDAR directions.
+- Added a package-source SHA-256 fingerprint to result, dataset, batch, and frontier metadata.
+- Added an isolated Windows GUI build script and frozen-app smoke test.
+- Added a connected serial batch tab to the bilingual GUI, with full export and summary display.
+- Corrected per-seed failure labels for higher-is-better robustness metrics.
+- Added a GUI ASRF study tab with background execution, probability map, sampled conditions, and full export.
+- Added deterministic linear-ramp and abrupt temporal dropout profiles for LiDAR, odometry, and IMU.
+- Added exploratory, tie-aware Spearman sensitivity export for ASRF-sampled conditions.
+- Added independent-seed real-simulation comparison of Grid, Random, LHS, and ASRF; Grid now uses the exact budget.
+- Added optional multilayer 3D LiDAR ray casting and ground-truth-framed point export to synthetic datasets.
+- Added estimated-planar-pose 3D point accumulation and CSV export for simulation runs, plus an interactive Qt cloud view.
+- Added a Documents-folder fallback for GUI exports when the frozen application directory is protected.
+- Added world-coordinate rectangular packet-dropout regions, composable with temporal profiles, for LiDAR, odometry, and IMU.
+- Added a publication-oriented 3D measured-point-map figure for multilayer runs, distinct from the 3D world scene and GUI view.
+- Added selectable PNG, SVG, and PDF formats for single-run scientific figures.
+- Added static-wall 3D point-map accuracy, completeness, Chamfer, precision, recall, and F1 metrics with explicit ground exclusion.
+- Added optional deterministic perspective RGB-D camera frames with configurable noise, blur, illumination, contrast, occlusion, dropout, and dataset image/depth export.
+- Added a bilingual background dataset-generation tab with a measured camera-frame preview and app-local/Documents fallback paths.
+- Added an opt-in normalized SLAM Robustness Score with configurable scales/weights and exact local weight sensitivity; ASRF can use it without hiding individual metrics.
+- Added same-seed paired algorithm differences and descriptive Cohen dz effect sizes to batch exports.
+- Added a workspace-contained test/style runner that creates local temporary and cache directories before invoking tools.
+- Added validated YAML-defined piecewise robot motion, with CLI/GUI replay and an end-to-end example.
+- Added a seeded multi-room indoor world with doorway/corridor geometry and six-world algorithm compatibility tests.
+- Added optional sparse LiDAR occupancy mapping with unknown-space preservation, static-wall IoU/F1, CSV export, and an observed-map figure.
+- Added a sampled ground-truth centerline/static-wall contact diagnostic to flag physically questionable prescribed paths.
+- Added a bilingual GUI tab for observed occupancy cells, reference-wall gaps, and trajectories.
+- Added held-out Brier and 10-bin calibration diagnostics with reliability-table export for real-simulation sampler comparisons.
+- Expanded the planar robot's synthetic IMU dataset to six measured axes with gravity-specific-force, lateral acceleration, and independent auxiliary-axis degradation.
+- Removed the automatic Documents export fallback so a protected output folder cannot cause writes outside the chosen location.
+- Added integration tests for every shipped example and for CLI run, dataset, batch, and robustness-study exports.
+- Hardened ASRF parameter domains, hyperparameters, and objective margins against invalid or non-finite inputs.
