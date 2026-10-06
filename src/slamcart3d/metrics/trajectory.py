@@ -76,6 +76,8 @@ def trajectory_metrics(reference: np.ndarray, estimate: np.ndarray) -> dict[str,
     traveled = float(np.sum(np.linalg.norm(np.diff(reference[:, :2], axis=0), axis=1)))
     return {
         "ate_rmse_m": absolute_trajectory_error(reference, estimate),
+        "position_rmse_unaligned_m": absolute_trajectory_error(reference, estimate, align=False),
+        "position_final_unaligned_m": float(np.linalg.norm(reference[-1, :2] - estimate[-1, :2])),
         "rpe_translation_rmse_m": rpe_translation,
         "rpe_rotation_rmse_rad": rpe_rotation,
         "final_position_error_m": final_error,

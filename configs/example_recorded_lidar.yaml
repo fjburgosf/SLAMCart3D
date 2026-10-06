@@ -1,0 +1,21 @@
+experiment:
+  name: recorded_lidar_replay
+  # Replay ignores simulation geometry. This room also makes the example safe
+  # if it is deliberately run as a synthetic simulation.
+  simulation:
+    world: custom
+    world_segments:
+      - {x1: -10, y1: -10, x2: 30, y2: -10, height_m: 2.5}
+      - {x1: 30, y1: -10, x2: 30, y2: 30, height_m: 2.5}
+      - {x1: 30, y1: 30, x2: -10, y2: 30, height_m: 2.5}
+      - {x1: -10, y1: 30, x2: -10, y2: -10, height_m: 2.5}
+  robot:
+    initial_x_m: 0.0
+    initial_y_m: 0.0
+    initial_yaw_rad: 0.0
+  lidar:
+    beam_count: 180
+    field_of_view_deg: 180.0
+    max_range_m: 80.0
+  slam:
+    algorithm: posegraph_hybrid

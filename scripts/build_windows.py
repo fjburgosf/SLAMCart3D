@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from slamcart3d import __version__
 from slamcart3d.core.provenance import source_sha256
 
 
@@ -31,6 +32,23 @@ def main() -> int:
         directory.mkdir(parents=True, exist_ok=False)
     manifest = temporary / "source_sha256.txt"
     manifest.write_text(source_sha256() + "\n", encoding="ascii")
+    version_resource = temporary / "version_info.txt"
+    version_tuple = tuple(int(value) for value in __version__.split(".")) + (0,)
+    version_resource.write_text(
+        "VSVersionInfo(ffi=FixedFileInfo(filevers="
+        + repr(version_tuple)
+        + ", prodvers="
+        + repr(version_tuple)
+        + ", mask=0x3f, flags=0, OS=0x40004, fileType=1, subtype=0, date=(0, 0)), "
+        + "kids=[StringFileInfo([StringTable('040904B0', ["
+        + "StringStruct('FileDescription', 'SLAMCart3D'), "
+        + "StringStruct('ProductName', 'SLAMCart3D'), "
+        + f"StringStruct('FileVersion', '{__version__}'), "
+        + f"StringStruct('ProductVersion', '{__version__}'), "
+        + "StringStruct('OriginalFilename', 'SLAMCart3D.exe')])]), "
+        + "VarFileInfo([VarStruct('Translation', [1033, 1200])])])\n",
+        encoding="utf-8",
+    )
 
     env = os.environ.copy()
     env["TEMP"] = str(temporary)
@@ -56,6 +74,8 @@ def main() -> int:
         "WARN",
         "--name",
         "SLAMCart3D",
+        "--version-file",
+        str(version_resource),
         "--paths",
         str(root / "src"),
         "--distpath",

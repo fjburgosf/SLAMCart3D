@@ -106,7 +106,7 @@ def test_frozen_default_paths_stay_next_to_executable(monkeypatch, tmp_path) -> 
     monkeypatch.setattr(gui_app.sys, "frozen", True, raising=False)
     monkeypatch.setattr(gui_app.sys, "_MEIPASS", str(tmp_path), raising=False)
     monkeypatch.setattr(gui_app.sys, "executable", str(executable))
-    assert bundled_example_path() == str(tmp_path / "configs" / "example_01_clean_environment.yaml")
+    assert bundled_example_path() == str(tmp_path / "configs" / "example_multilayer_lidar.yaml")
     assert default_results_path() == str(tmp_path / "results")
     assert default_datasets_path() == str(tmp_path / "datasets")
 
@@ -195,7 +195,10 @@ def test_asrf_tab_executes_and_exports_map(application, tmp_path) -> None:
     window = MainWindow()
     base = window.current_config()
     short = replace(
-        base, lidar=replace(base.lidar, beam_count=8), simulation=replace(base.simulation, duration_s=0.2)
+        base,
+        lidar=replace(base.lidar, beam_count=8),
+        lidar3d=replace(base.lidar3d, enabled=False),
+        simulation=replace(base.simulation, duration_s=0.2),
     )
     window._set_from_config(short)
     window._inputs["output"].setText(str(tmp_path))
@@ -257,7 +260,8 @@ def test_3d_tab_shows_estimated_cloud_and_translates(application, tmp_path) -> N
         "True cart",
         "Estimated cart",
     )
-    assert "not 6DoF SLAM" in window.cloud_hint.text()
+    assert "XYZ hybrid corrects six pose components" in window.cloud_hint.text()
+    assert "other estimators are planar" in window.cloud_hint.text()
     window.close()
 
 
@@ -365,6 +369,7 @@ def test_controlled_study_button_builds_plot_and_exports(application, tmp_path) 
 
 def test_asrf_gui_can_use_3d_wall_metric_when_sensor_enabled(application, tmp_path) -> None:
     window = MainWindow()
+    window._inputs["lidar3d_enabled"].setChecked(False)
     metric_index = window.frontier_metric_combo.findData("map3d_wall_f1_0p25")
     assert metric_index >= 0
     window.frontier_metric_combo.setCurrentIndex(metric_index)

@@ -4,11 +4,40 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args, get_origin, get_type_hints
 
 import yaml
+
+
+@lru_cache(maxsize=None)
+def _field_types(config_type: type) -> dict[str, Any]:
+    return get_type_hints(config_type)
+
+
+def _validate_types(value: Any, expected: Any, path: str) -> None:
+    """Reject ambiguous inputs before they silently alter an experiment."""
+
+    if expected is float:
+        valid = isinstance(value, (int, float)) and not isinstance(value, bool)
+    elif expected in (int, bool, str):
+        valid = type(value) is expected
+    elif get_origin(expected) is tuple:
+        if not isinstance(value, (tuple, list)):
+            raise ValueError(f"{path} must be a sequence")
+        for index, item in enumerate(value):
+            _validate_types(item, get_args(expected)[0], f"{path}[{index}]")
+        return
+    else:
+        valid = isinstance(value, expected)
+    if not valid:
+        raise ValueError(f"{path} must have type {expected.__name__}")
+    if is_dataclass(value):
+        hints = _field_types(type(value))
+        for item in fields(value):
+            _validate_types(getattr(value, item.name), hints[item.name], f"{path}.{item.name}")
 
 
 @dataclass(frozen=True)
@@ -153,6 +182,25 @@ class SLAMConfig:
 
 
 @dataclass(frozen=True)
+class NavigationConfig:
+    """Sensor-driven frontier exploration; no world geometry is supplied."""
+
+    resolution_m: float = 0.25
+    max_yaw_rate_rad_s: float = 0.8
+    safety_margin_m: float = 0.12
+    replan_steps: int = 15
+
+
+@dataclass(frozen=True)
+class EvaluationConfig:
+    """Explicit display thresholds, not statistical confidence bounds."""
+
+    position_limit_m: float = 0.1
+    wall_distance_limit_m: float = 0.1
+    coverage_target: float = 0.8
+
+
+@dataclass(frozen=True)
 class RobustnessScoreConfig:
     """Optional, explicitly weighted and normalized robustness score."""
 
@@ -177,6 +225,15 @@ class OccupancyGridConfig:
 
 
 @dataclass(frozen=True)
+class ReconstructionConfig:
+    """Evidence thresholds for measured 3D voxel surfaces."""
+
+    enabled: bool = False
+    resolution_m: float = 0.25
+    min_hits: int = 2
+
+
+@dataclass(frozen=True)
 class ExperimentConfig:
     """Complete input required to reproduce one experiment."""
 
@@ -192,8 +249,14 @@ class ExperimentConfig:
     slam: SLAMConfig = field(default_factory=SLAMConfig)
     robustness_score: RobustnessScoreConfig = field(default_factory=RobustnessScoreConfig)
     occupancy_grid: OccupancyGridConfig = field(default_factory=OccupancyGridConfig)
+    navigation: NavigationConfig = field(default_factory=NavigationConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+    reconstruction: ReconstructionConfig = field(default_factory=ReconstructionConfig)
 
     def __post_init__(self) -> None:
+        _validate_types(self, ExperimentConfig, "experiment")
+        if not self.name.strip():
+            raise ValueError("experiment name must not be empty")
         if any(not isinstance(segment, MotionSegment) for segment in self.simulation.motion_segments):
             raise ValueError("motion_segments must contain MotionSegment values")
         if any(not isinstance(wall, WallConfig) for wall in self.simulation.world_segments):
@@ -234,6 +297,13 @@ class ExperimentConfig:
             self.slam.icp_max_correspondence_m,
             self.slam.icp_prior_weight,
             self.occupancy_grid.resolution_m,
+            self.reconstruction.resolution_m,
+            self.navigation.resolution_m,
+            self.navigation.max_yaw_rate_rad_s,
+            self.navigation.safety_margin_m,
+            self.evaluation.position_limit_m,
+            self.evaluation.wall_distance_limit_m,
+            self.evaluation.coverage_target,
             *(value for name, value in self.robustness_score.__dict__.items() if name != "enabled"),
             *(
                 value
@@ -245,8 +315,32 @@ class ExperimentConfig:
             raise ValueError("configuration values must be finite")
         if self.simulation.timestep_s <= 0.0 or self.simulation.duration_s <= 0.0:
             raise ValueError("duration_s and timestep_s must be positive")
-        if self.simulation.motion_profile not in {"constant", "sinusoidal_yaw", "stop_turn", "scripted"}:
+        if self.simulation.motion_profile not in {
+            "constant",
+            "sinusoidal_yaw",
+            "stop_turn",
+            "scripted",
+            "frontier",
+        }:
             raise ValueError(f"unsupported motion profile: {self.simulation.motion_profile}")
+        if not 0.05 <= self.navigation.resolution_m <= 1.0:
+            raise ValueError("navigation resolution must be between 0.05 and 1.0 m")
+        if (
+            self.navigation.max_yaw_rate_rad_s <= 0
+            or self.navigation.safety_margin_m < 0
+            or self.navigation.replan_steps < 1
+        ):
+            raise ValueError("navigation turn rate and replan steps must be positive; margin nonnegative")
+        if self.simulation.motion_profile == "frontier" and (
+            not self.simulation.stop_at_walls or self.simulation.linear_velocity_m_s <= 0
+        ):
+            raise ValueError("frontier exploration requires wall protection and positive forward speed")
+        if (
+            self.evaluation.position_limit_m <= 0
+            or self.evaluation.wall_distance_limit_m <= 0
+            or not 0 < self.evaluation.coverage_target <= 1
+        ):
+            raise ValueError("evaluation distance limits must be positive and coverage in (0, 1]")
         if self.simulation.world == "custom" and not self.simulation.world_segments:
             raise ValueError("custom world requires at least one wall segment")
         if any(
@@ -309,10 +403,16 @@ class ExperimentConfig:
             "icp_odometry",
             "wheel_imu_fusion",
             "adaptive_hybrid",
+            "posegraph_hybrid",
+            "hybrid_3d",
         }:
             raise ValueError(f"unsupported SLAM algorithm: {self.slam.algorithm}")
         if self.slam.algorithm == "wheel_imu_fusion" and not self.imu.enabled:
             raise ValueError("wheel_imu_fusion requires an enabled IMU")
+        if self.slam.algorithm == "hybrid_3d" and not self.lidar3d.enabled:
+            raise ValueError("hybrid_3d requires enabled multilayer LiDAR")
+        if not 0.05 <= self.reconstruction.resolution_m <= 1.0 or self.reconstruction.min_hits < 1:
+            raise ValueError("reconstruction resolution must be in [0.05, 1.0] m and min_hits positive")
         if not 0.05 <= self.occupancy_grid.resolution_m <= 1.0:
             raise ValueError("occupancy grid resolution must be between 0.05 and 1.0 m")
         if not isinstance(self.occupancy_grid.beam_stride, int) or self.occupancy_grid.beam_stride < 1:
@@ -388,7 +488,17 @@ class ExperimentConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExperimentConfig":
-        """Build a configuration while rejecting no known nested sections."""
+        """Build a configuration without ignoring misspelled input fields."""
+
+        if not isinstance(data, dict):
+            raise ValueError("experiment configuration must be a mapping")
+        unknown = set(data) - {item.name for item in fields(cls)}
+        if unknown:
+            raise ValueError(f"unknown experiment fields: {sorted(unknown, key=str)}")
+        for section in fields(cls):
+            if section.name not in {"name", "seed"} and section.name in data:
+                if not isinstance(data[section.name], dict):
+                    raise ValueError(f"{section.name} must be a mapping")
 
         simulation_data = dict(data.get("simulation", {}))
         if "motion_segments" in simulation_data:
@@ -405,7 +515,7 @@ class ExperimentConfig:
             simulation_data["world_segments"] = tuple(WallConfig(**item) for item in walls)
         return cls(
             name=data.get("name", cls.name),
-            seed=int(data.get("seed", cls.seed)),
+            seed=data.get("seed", cls.seed),
             robot=RobotConfig(**data.get("robot", {})),
             lidar=LidarConfig(**data.get("lidar", {})),
             lidar3d=Lidar3DConfig(**data.get("lidar3d", {})),
@@ -416,6 +526,9 @@ class ExperimentConfig:
             slam=SLAMConfig(**data.get("slam", {})),
             robustness_score=RobustnessScoreConfig(**data.get("robustness_score", {})),
             occupancy_grid=OccupancyGridConfig(**data.get("occupancy_grid", {})),
+            navigation=NavigationConfig(**data.get("navigation", {})),
+            evaluation=EvaluationConfig(**data.get("evaluation", {})),
+            reconstruction=ReconstructionConfig(**data.get("reconstruction", {})),
         )
 
     @classmethod
@@ -427,4 +540,6 @@ class ExperimentConfig:
             data = json.load(stream) if source.suffix.lower() == ".json" else yaml.safe_load(stream)
         if not isinstance(data, dict):
             raise ValueError("experiment configuration must be a mapping")
+        if "experiment" in data and set(data) != {"experiment"}:
+            raise ValueError("configuration wrapper must contain only experiment")
         return cls.from_dict(data.get("experiment", data))

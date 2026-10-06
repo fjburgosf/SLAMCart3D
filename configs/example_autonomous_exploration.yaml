@@ -1,0 +1,23 @@
+experiment:
+  name: autonomous_frontier_exploration
+  seed: 42
+  simulation:
+    world: indoor_simple
+    motion_profile: frontier
+    duration_s: 60.0
+    timestep_s: 0.1
+    linear_velocity_m_s: 0.4
+    stop_at_walls: true
+  slam:
+    algorithm: posegraph_hybrid
+  lidar:
+    beam_count: 60
+  lidar3d:
+    enabled: true
+    azimuth_beams: 36
+    elevation_beams: 5
+    vertical_fov_deg: 40.0
+  occupancy_grid:
+    enabled: true
+    resolution_m: 0.25
+    beam_stride: 1

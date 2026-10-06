@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Callable, Iterator
 
 import numpy as np
 
 from slamcart3d.core.config import ExperimentConfig
 from slamcart3d.core.models import CameraFrame, IMUSample, LidarScan, LidarScan3D, Pose2D
 from slamcart3d.degradation.engine import DegradationEngine
+from slamcart3d.navigation.frontier import FrontierExplorer
 from slamcart3d.robots.differential_drive import DifferentialDrive
+from slamcart3d.robots.geometry import cart_clearance_radius
 from slamcart3d.sensors.camera import SyntheticCamera
 from slamcart3d.sensors.imu import PlanarIMU
 from slamcart3d.sensors.lidar import PlanarLidar
@@ -60,7 +62,7 @@ class ObservationStream:
         self.timesteps = int(round(config.simulation.duration_s / config.simulation.timestep_s))
         self.timestamps = np.arange(self.timesteps + 1, dtype=float) * config.simulation.timestep_s
 
-    def frames(self) -> Iterator[SimulationFrame]:
+    def frames(self, pose_feedback: Callable[[], Pose2D] | None = None) -> Iterator[SimulationFrame]:
         """Generate the same observations for every traversal of this stream."""
 
         config = self.config
@@ -71,21 +73,37 @@ class ObservationStream:
         imu = PlanarIMU()
         degradation = DegradationEngine(config.degradation, config.seed + 1)
         previous_velocity = 0.0
+        navigator_robot = DifferentialDrive(
+            config.robot.wheel_radius_m, config.robot.wheel_base_m, self.initial_pose
+        )
+        explorer = (
+            FrontierExplorer(
+                config.navigation,
+                cart_clearance_radius(config.robot.wheel_radius_m, config.robot.wheel_base_m),
+                config.simulation.linear_velocity_m_s,
+                config.lidar.max_range_m,
+            )
+            if config.simulation.motion_profile == "frontier"
+            else None
+        )
+        self.navigation_diagnostics = {}
+        previous_scan = None
         for step_index, timestamp in enumerate(self.timestamps[1:]):
             progress = (step_index + 1) / self.timesteps
-            linear_velocity, yaw_rate = motion_command(config.simulation, step_index, self.timesteps)
+            if explorer is None:
+                linear_velocity, yaw_rate = motion_command(config.simulation, step_index, self.timesteps)
+            else:
+                estimated_pose = pose_feedback() if pose_feedback is not None else navigator_robot.pose
+                linear_velocity, yaw_rate = explorer.command(estimated_pose, previous_scan)
+                self.navigation_diagnostics = explorer.diagnostics()
             left, right = robot.wheel_rates(linear_velocity, yaw_rate)
             previous_pose = robot.pose
             true_pose = robot.step(left, right, config.simulation.timestep_s)
-            blocked_by_wall = (
-                config.simulation.stop_at_walls
-                and self.world.path_clearance_m(
-                    (previous_pose.x, previous_pose.y),
-                    (true_pose.x, true_pose.y),
-                    float(timestamp),
-                )
-                < config.robot.wheel_base_m / 2.0
-            )
+            blocked_by_wall = config.simulation.stop_at_walls and self.world.path_clearance_m(
+                (previous_pose.x, previous_pose.y),
+                (true_pose.x, true_pose.y),
+                float(timestamp),
+            ) < cart_clearance_radius(config.robot.wheel_radius_m, config.robot.wheel_base_m)
             if blocked_by_wall:
                 robot.pose = previous_pose
                 true_pose = previous_pose
@@ -109,6 +127,8 @@ class ObservationStream:
                 else None
             )
             measured_left, measured_right = degradation.degrade_wheel_rates(left, right, progress, true_pose)
+            navigator_robot.step(measured_left, measured_right, config.simulation.timestep_s)
+            previous_scan = measured_scan
             ideal_imu = (
                 imu.sample(
                     float(timestamp),

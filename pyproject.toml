@@ -4,13 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "slamcart3d"
-version = "0.1.0"
+version = "1.0.0"
 description = "Reproducible framework for SLAM robustness simulation and adaptive frontier estimation"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-  {name = "Francisco Javier Burgos Flórez"},
-  {name = "Juan Pablo Hoyos Sánchez"},
+  {name = "Francisco Javier Burgos Flórez", email = "fjburgosf@gmail.com"},
   {name = "Juan Guillermo Popayán Hernández"},
 ]
 dependencies = [

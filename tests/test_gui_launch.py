@@ -37,7 +37,7 @@ def test_runtime_directories_stay_inside_launch_folder(monkeypatch, tmp_path) ->
 def test_desktop_self_test_covers_current_tabs_and_estimators(tmp_path) -> None:
     root = Path(__file__).resolve().parents[1]
     (tmp_path / "configs").mkdir()
-    shutil.copy2(root / "configs" / "example_01_clean_environment.yaml", tmp_path / "configs")
+    shutil.copy2(root / "configs" / "example_multilayer_lidar.yaml", tmp_path / "configs")
     environment = os.environ.copy()
     environment["QT_QPA_PLATFORM"] = "offscreen"
     environment["PYTHONDONTWRITEBYTECODE"] = "1"

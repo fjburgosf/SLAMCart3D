@@ -25,7 +25,7 @@ def test_vertical_slice_is_reproducible_and_exportable(tmp_path) -> None:
     assert (target / "trajectory.csv").exists()
     metadata = json.loads((target / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["seed"] == config.seed
-    assert metadata["software_version"] == "0.1.0"
+    assert metadata["software_version"] == "1.0.0"
     assert len(metadata["source_sha256"]) == 64
     assert metadata["source_sha256"] == first.source_sha256
     assert metadata["map_evaluation"]["match_tolerance_m"] == 0.25

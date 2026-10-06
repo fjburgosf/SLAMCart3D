@@ -253,6 +253,49 @@ def warehouse_shelves(seed: int) -> World3D:
     return World3D(name="warehouse_shelves", segments=tuple(walls))
 
 
+def indoor_maze(seed: int) -> World3D:
+    """Generate a connected, closed 15 x 12 m maze with 3 m wide passages.
+
+    Randomized depth-first carving creates a spanning tree of 5 x 4 cells:
+    every cell is reachable, with turns and dead ends but no enclosed islands.
+    The seed controls topology, not the exploration route. Default (5, 4)
+    lies inside a cell, clear of any possible wall. Walls are 2.5 m high;
+    the outer boundary stays closed for controlled mapping experiments.
+    """
+
+    rng = np.random.default_rng(seed)
+    columns, rows, cell_size = 5, 4, 3.0
+    visited = {(1, 1)}
+    stack = [(1, 1)]
+    openings = set()
+    while stack:
+        x, y = stack[-1]
+        candidates = [
+            (nx, ny)
+            for nx, ny in ((x + 1, y), (x, y + 1), (x - 1, y), (x, y - 1))
+            if 0 <= nx < columns and 0 <= ny < rows and (nx, ny) not in visited
+        ]
+        if not candidates:
+            stack.pop()
+            continue
+        neighbor = candidates[int(rng.integers(len(candidates)))]
+        openings.add(frozenset(((x, y), neighbor)))
+        visited.add(neighbor)
+        stack.append(neighbor)
+
+    walls = _box(0.0, 0.0, columns * cell_size, rows * cell_size, height=2.5)
+    # Emit each shared cell boundary once, unless carving opened it.
+    for y in range(rows):
+        for x in range(columns):
+            if x + 1 < columns and frozenset(((x, y), (x + 1, y))) not in openings:
+                boundary = (x + 1) * cell_size
+                walls.append(WallSegment(boundary, y * cell_size, boundary, (y + 1) * cell_size))
+            if y + 1 < rows and frozenset(((x, y), (x, y + 1))) not in openings:
+                boundary = (y + 1) * cell_size
+                walls.append(WallSegment(x * cell_size, boundary, (x + 1) * cell_size, boundary))
+    return World3D(name="indoor_maze", segments=tuple(walls))
+
+
 def indoor_dynamic(seed: int) -> World3D:
     """Add one seeded moving obstacle to the static indoor room."""
 
@@ -291,6 +334,7 @@ def make_world(name: str, seed: int) -> World3D:
         "indoor_corridor": indoor_corridor,
         "indoor_complex": indoor_complex,
         "warehouse_shelves": warehouse_shelves,
+        "indoor_maze": indoor_maze,
         "indoor_dynamic": indoor_dynamic,
         "outdoor_blocks": outdoor_blocks,
     }

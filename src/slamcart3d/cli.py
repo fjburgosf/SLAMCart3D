@@ -9,7 +9,10 @@ from pathlib import Path
 
 import numpy as np
 
+from slamcart3d import __version__
+from slamcart3d.core.config import ExperimentConfig
 from slamcart3d.datasets.generator import generate_dataset
+from slamcart3d.datasets.replay import export_replay, replay_recording
 from slamcart3d.experiments.batch import export_batch, run_batch
 from slamcart3d.experiments.experiment import Experiment
 from slamcart3d.experiments.hybrid_validation import (
@@ -33,6 +36,7 @@ from slamcart3d.robustness.validation import export_validation_suite, run_valida
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="slamcart3d", description="Scientific SLAM robustness framework")
+    parser.add_argument("--version", action="version", version=f"SLAMCart3D {__version__}")
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="run one YAML/JSON experiment")
@@ -50,6 +54,13 @@ def _parser() -> argparse.ArgumentParser:
     dataset = commands.add_parser("generate-dataset", help="save synthetic observations without running SLAM")
     dataset.add_argument("config", type=Path)
     dataset.add_argument("--output", type=Path, default=Path("datasets"))
+    replay = commands.add_parser("replay", help="run measured CSV or CARMEN FLASER; reference is optional")
+    replay.add_argument("recording", type=Path)
+    replay.add_argument("config", type=Path)
+    replay.add_argument("--reference", type=Path)
+    replay.add_argument("--frames", type=int, default=1000)
+    replay.add_argument("--timestamp-policy", choices=("strict", "sort_unique"), default="strict")
+    replay.add_argument("--output", type=Path, default=Path("results"))
     batch = commands.add_parser("batch", help="compare algorithms and worlds over independent seeds")
     batch.add_argument("config", type=Path)
     batch.add_argument("--seeds", default="0,1,2,3,4")
@@ -136,6 +147,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "generate-dataset":
         target = generate_dataset(Experiment.from_file(args.config).config, args.output)
         logging.getLogger(__name__).info("dataset exported to %s", target)
+        return 0
+    if args.command == "replay":
+        result = replay_recording(
+            args.recording,
+            ExperimentConfig.load(args.config),
+            reference_path=args.reference,
+            max_frames=args.frames,
+            timestamp_policy=args.timestamp_policy,
+        )
+        target = export_replay(result, args.output)
+        logging.getLogger(__name__).info(
+            "recorded-data result exported to %s; reference available: %s",
+            target,
+            result.reference is not None,
+        )
         return 0
     if args.command == "batch":
         seeds = tuple(int(value.strip()) for value in args.seeds.split(",") if value.strip())

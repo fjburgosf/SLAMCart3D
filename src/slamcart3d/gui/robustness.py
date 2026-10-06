@@ -86,6 +86,11 @@ class RobustnessCanvas(QWidget):
             start, end = (245, 158, 11), (34, 197, 94)
         return QColor(*(round(a + fraction * (b - a)) for a, b in zip(start, end, strict=True)))
 
+    def plot_rectangle(self) -> QRectF:
+        """Reserve room for numeric ticks, both axis labels, and the legend."""
+
+        return QRectF(72, 24, max(10, self.width() - 100), max(10, self.height() - 125))
+
     def paintEvent(self, event) -> None:
         del event
         painter = QPainter(self)
@@ -96,7 +101,7 @@ class RobustnessCanvas(QWidget):
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.empty_label)
             return
         study = self.study
-        plot = QRectF(72, 24, max(10, self.width() - 100), max(10, self.height() - 105))
+        plot = self.plot_rectangle()
         probabilities = study.success_probability
         height, width = probabilities.shape
         image = QImage(width, height, QImage.Format.Format_RGB32)

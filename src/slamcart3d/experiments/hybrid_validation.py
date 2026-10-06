@@ -21,6 +21,7 @@ METHODS = (
     "wheel_imu_fusion",
     "icp_odometry",
     "adaptive_hybrid",
+    "posegraph_hybrid",
     "hybrid_no_imu",
     "hybrid_fixed_trust",
     "hybrid_no_map_gate",
@@ -82,6 +83,10 @@ def run_hybrid_benchmark(
 ) -> HybridBenchmark:
     """Run each method with identical seed and condition in a fixed order."""
 
+    if base.simulation.motion_profile == "frontier":
+        raise ValueError(
+            "paired benchmark requires programmed motion; use recorded replay for autonomous data"
+        )
     if not scenarios or len(set(s.name for s in scenarios)) != len(scenarios):
         raise ValueError("scenarios must be non-empty and uniquely named")
     if len(seeds) < 2 or len(set(seeds)) != len(seeds) or any(seed < 0 for seed in seeds):

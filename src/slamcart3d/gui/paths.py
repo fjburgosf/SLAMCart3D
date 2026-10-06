@@ -29,12 +29,16 @@ def configure_local_runtime() -> Path:
     return runtime
 
 
-def bundled_example_path() -> str:
-    """Locate the example in either the source checkout or the frozen bundle."""
-
+def bundled_configs_path() -> Path:
+    """Locate examples independently of the launcher's working directory."""
     if getattr(sys, "frozen", False):
-        return str(Path(sys._MEIPASS) / "configs" / "example_01_clean_environment.yaml")
-    return "configs/example_01_clean_environment.yaml"
+        return Path(sys._MEIPASS) / "configs"
+    return Path(__file__).resolve().parents[3] / "configs"
+
+
+def bundled_example_path() -> str:
+    """Locate the default example in the checkout or the frozen bundle."""
+    return str(bundled_configs_path() / "example_multilayer_lidar.yaml")
 
 
 def default_results_path() -> str:

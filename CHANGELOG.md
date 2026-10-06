@@ -1,11 +1,34 @@
 # Changelog
 
-## 0.1.0
+## 1.0.0
 
+- Added a sixth estimator using measured XYZ scan-to-map registration, six-component pose correction, a soft level-ground prior, adaptive reliability and map gating; no 3D loop closure or unrestricted-terrain validation is claimed.
+- Added optional measured 3D voxel evidence, supporting-scan thresholds, reconstruction-only/comparison controls, timeline-safe surfaces, 6D pose CSVs and a boundary-triangle PLY export without simulated-wall input.
+- Added a reconstruction example, bilingual controls, packaged XYZ self-test and mathematical, export, temporal and world-compatibility regressions. Reconstruction is opt-in to keep unrelated robustness studies lightweight.
+- Added a seeded, connected 15 × 12 m indoor maze with 3 m passages, 2.5 m walls, an autonomous exploration example, and bilingual scene selection in individual runs and batches.
+- Documented environment selection in the integrated guide; tested maze connectivity, robot clearance, sensing, all five estimators, rendering and example loading.
+- Added an optional bilingual eight-step tutorial, F1 access, real-page navigation, and a confirmed 30-second autonomous exploration practice that preserves the output folder.
+- Covered tutorial navigation, language, close/reopen, busy guards, cancellation, load failure and execution in regressions; the packaged self-test also traverses every tutorial destination.
+- Added bilingual drop-down catalogs for all 24 bundled examples and six desktop workflows, with explicit loading and no automatic execution.
+- Located bundled configurations independently of the working directory and blocked configuration loading during background tasks.
+- Added example-loading and workflow-navigation coverage to desktop regression tests and the packaged self-test.
+- Added measured-grid frontier exploration using estimated poses, with route inflation and a measured-range stop guard.
+- Added a fifth estimator with scan-verified loop constraints, final anchored pose-graph optimization, rebuilt maps and a retained online trajectory.
+- Added direct unaligned position errors, explicit visual quality thresholds, observed/unknown areas, and reference-dependent wall-error coloring.
+- Added measured CSV and legacy CARMEN FLASER replay in the CLI and bilingual GUI, with independent-reference-only accuracy evaluation and explicit timestamp ordering.
+- Expanded the paired hybrid benchmark to eight variants and rejected feedback-dependent autonomous paths in that fixed-input comparison.
+- Expanded GUI/self-tests to ten tabs and six background actions, including recovery from recorded-data export failure.
+- Rejected fractional seeds, non-integer sensor counts, quoted boolean flags, and unknown top-level configuration fields instead of silently coercing them.
+- Allowed multilayer runs in low-wall custom scenes to finish without assigning undefined wall-quality scores; exports record why that evaluation is unavailable.
+- Preserved completed-study axis labels when editing the next study; fixed translated running/failure status and the ASRF legend layout.
+- Cleared stale metrics on a new run, explained camera-disabled datasets, and preserved the original error if incremental-export cleanup also fails.
+- Exercised file dialogs and all five background actions, their exports, and temporal controls in the packaged desktop self-test.
 - Added a proposed adaptive wheel/IMU and LiDAR scan-to-map estimator with online reliability adjustment and map gating.
 - Added a paired four-condition comparison of SLAM references and hybrid ablations, retaining all run data and descriptive contrasts.
 - Added controlled one-variable sweeps to the CLI and bilingual desktop interface, with response curves and per-seed exports.
 - Added live step-by-step visualization, timeline review, reference visibility control, and incremental result saving.
+- Corrected the 3D vertical projection; added shaded walls, metric ground-contact wheels, perspective/orthographic camera controls, top view, and an explicit display-only wall cutaway.
+- Matched the wall-stop clearance to the schematic chassis and wheel dimensions; the GUI now starts with the bundled multilayer LiDAR example so its first run builds a measured 3D cloud.
 - Added editable finite-height wall scenes, an explicit gridded floor, oriented cart displays, and default stopping at static walls.
 - Expanded desktop self-tests to the current nine tabs and new estimator/study paths; runtime caches now stay beside the application.
 - Added the reproducible headless vertical slice.

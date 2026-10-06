@@ -1,0 +1,19 @@
+experiment:
+  name: loop_closure_circle
+  seed: 42
+  simulation:
+    duration_s: 65.0
+    linear_velocity_m_s: 0.4
+    yaw_rate_rad_s: 0.2
+  lidar:
+    beam_count: 90
+  slam:
+    algorithm: posegraph_hybrid
+  degradation:
+    wheel_rate_noise_std_rad_s: 0.1
+  lidar3d:
+    enabled: true
+    azimuth_beams: 24
+    elevation_beams: 3
+  occupancy_grid:
+    enabled: true

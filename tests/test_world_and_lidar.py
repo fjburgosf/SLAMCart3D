@@ -23,6 +23,7 @@ def test_named_worlds_are_distinct_and_reproducible() -> None:
         "indoor_corridor",
         "indoor_complex",
         "warehouse_shelves",
+        "indoor_maze",
         "indoor_dynamic",
         "outdoor_blocks",
     )
@@ -36,7 +37,7 @@ def test_named_worlds_are_distinct_and_reproducible() -> None:
 def test_new_worlds_provide_finite_lidar_observations() -> None:
     lidar = PlanarLidar(9, 180.0, 20.0)
     pose = Pose2D(5.0, 4.0, 0.0)
-    for name in ("indoor_corridor", "indoor_complex", "warehouse_shelves"):
+    for name in ("indoor_corridor", "indoor_complex", "warehouse_shelves", "indoor_maze"):
         scan = lidar.scan(0.0, pose, make_world(name, 42))
         assert np.isfinite(scan.ranges).all()
         assert np.all((scan.ranges > 0.0) & (scan.ranges <= 20.0))

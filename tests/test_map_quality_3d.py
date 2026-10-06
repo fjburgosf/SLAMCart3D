@@ -1,9 +1,15 @@
 """Objective static-wall 3D map metrics and their limitations."""
 
+import json
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
+from slamcart3d.core.config import ExperimentConfig, WallConfig
+from slamcart3d.io.export import export_result
 from slamcart3d.metrics.map_quality_3d import sample_wall_surface_points, wall_point_map_metrics_3d
+from slamcart3d.simulation.runner import run_simulation
 from slamcart3d.worlds.geometry import WallSegment, World3D
 
 
@@ -49,3 +55,27 @@ def test_3d_wall_metric_rejects_invalid_geometry_and_points() -> None:
         sample_wall_surface_points(world, spacing_m=0.0)
     with pytest.raises(ValueError, match="tolerance"):
         wall_point_map_metrics_3d(np.empty((0, 3)), world, tolerance_m=0.0)
+
+
+@pytest.mark.parametrize("height", [0.05, 0.1, 0.1000000005])
+def test_low_custom_walls_export_without_inventing_3d_quality_scores(tmp_path, height) -> None:
+    base = ExperimentConfig()
+    config = replace(
+        base,
+        lidar=replace(base.lidar, beam_count=8),
+        lidar3d=replace(base.lidar3d, enabled=True, azimuth_beams=3, elevation_beams=3),
+        simulation=replace(
+            base.simulation,
+            duration_s=0.2,
+            world="custom",
+            world_segments=(WallConfig(9.0, 0.0, 9.0, 8.0, height),),
+        ),
+    )
+    result = run_simulation(config)
+    assert all(np.isfinite(value) for value in result.metrics.values())
+    assert not any(name.startswith("map3d_wall_") for name in result.metrics)
+    assert result.map_points_3d.shape[1] == 3
+    path = export_result(result, tmp_path)
+    metadata = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["map3d_evaluation"]["available"] is False
+    assert "ground exclusion height" in metadata["map3d_evaluation"]["unavailable_reason"]

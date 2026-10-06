@@ -36,6 +36,16 @@ class IncrementalRunWriter:
             encoding="utf-8",
         )
         self._trajectory_file = (self.target / "trajectory_live.csv").open("x", encoding="utf-8", newline="")
+        self._state_file = (
+            (self.target / "trajectory_3d_live.csv").open("x", encoding="utf-8", newline="")
+            if started.config.lidar3d.enabled
+            else None
+        )
+        self._state_writer = csv.writer(self._state_file) if self._state_file else None
+        if self._state_writer:
+            self._state_writer.writerow(
+                ["step", "timestamp_s", "x_m", "y_m", "z_m", "roll_rad", "pitch_rad", "yaw_rad"]
+            )
         self._map_file = (self.target / "point_cloud_live.csv").open("x", encoding="utf-8", newline="")
         self._cloud_file = (
             (self.target / "point_cloud_3d_live.csv").open("x", encoding="utf-8", newline="")
@@ -56,6 +66,8 @@ class IncrementalRunWriter:
 
     def _flush(self) -> None:
         self._trajectory_file.flush()
+        if self._state_file:
+            self._state_file.flush()
         self._map_file.flush()
         if self._cloud_file is not None:
             self._cloud_file.flush()
@@ -80,6 +92,8 @@ class IncrementalRunWriter:
         if self._state != "running" or step.index != self.completed_steps + 1:
             raise ValueError("incremental steps must be written exactly once and in order")
         self._trajectory.writerow([step.index, step.timestamp_s, *step.ground_truth, *step.estimated])
+        if self._state_writer and step.estimated_3d is not None:
+            self._state_writer.writerow([step.index, step.timestamp_s, *step.estimated_3d])
         self._map.writerows([step.index, *point] for point in step.map_points_added)
         if self._cloud is not None:
             self._cloud.writerows([step.index, *point] for point in step.map_points_3d_added)
@@ -90,6 +104,8 @@ class IncrementalRunWriter:
 
     def close(self) -> None:
         self._trajectory_file.close()
+        if self._state_file:
+            self._state_file.close()
         self._map_file.close()
         if self._cloud_file is not None:
             self._cloud_file.close()
@@ -128,14 +144,37 @@ def export_result(
         "algorithm": result.diagnostics["algorithm"],
         "runtime_s": result.runtime_s,
         "diagnostics": result.diagnostics,
+        "trajectory_evaluation": {
+            "ate_and_legacy_final_error": "rigid SE(2) alignment before evaluation",
+            "position_unaligned": "direct distance in initial world frame; no alignment",
+            "final_trajectory": "pose graph optimized"
+            if result.online_estimated is not None
+            else "online estimate",
+            "incremental_trajectory": "online estimate, never retrospectively overwritten",
+        },
         "ground_truth_wall_contact_interpretation": (
             "count of sampled centerline chords touching any static wall; no collision response, "
             "robot radius, dynamic obstacle check, or continuous-arc guarantee"
         ),
         "lidar3d_point_count": int(len(result.map_points_3d)),
         "lidar3d_map_pose_source": (
-            "estimated planar pose and fixed sensor height; not 6DoF SLAM"
+            "measured XYZ registration; x,y,z,roll,pitch,yaw with soft level-ground prior"
+            if result.config.slam.algorithm == "hybrid_3d"
+            else "estimated planar pose and fixed sensor height; not 6DoF SLAM"
             if result.config.lidar3d.enabled
+            else None
+        ),
+        "reconstruction": (
+            {
+                "method": "external boundary triangles of measured occupied voxels",
+                "resolution_m": result.voxel_map.resolution_m,
+                "min_hits": result.voxel_map.min_hits,
+                "evidence": "one endpoint hit per cell per scan; finite ray interiors free",
+                "unknown": "unobserved space is not filled; surface is not necessarily watertight",
+                "probabilities": "categorical evidence, not calibrated probabilities",
+                "world_reference_used": False,
+            }
+            if result.voxel_map is not None
             else None
         ),
         "map_evaluation": {
@@ -147,10 +186,16 @@ def export_result(
         "map3d_evaluation": (
             {
                 "reference": "static vertical wall surfaces only",
+                "available": "map3d_wall_f1_0p25" in result.metrics,
+                "unavailable_reason": (
+                    None
+                    if "map3d_wall_f1_0p25" in result.metrics
+                    else "no static wall surface above the ground exclusion height"
+                ),
                 "ground_exclusion_height_m": GROUND_EXCLUSION_HEIGHT_M,
                 "wall_surface_sample_spacing_m": WALL_SURFACE_SAMPLE_SPACING_M,
                 "match_tolerance_m": WALL_3D_MATCH_TOLERANCE_M,
-                "alignment": "none; estimated planar pose in initial world frame",
+                "alignment": "none; estimated pose in initial world frame",
             }
             if result.config.lidar3d.enabled
             else None
@@ -202,6 +247,14 @@ def export_result(
         writer = csv.writer(stream)
         writer.writerow(["metric", "value"])
         writer.writerows(result.metrics.items())
+    if result.online_estimated is not None:
+        np.savetxt(
+            target / "trajectory_online.csv",
+            np.column_stack((result.timestamps, result.online_estimated)),
+            delimiter=",",
+            header="timestamp_s,x_m,y_m,yaw_rad",
+            comments="",
+        )
     np.savetxt(
         target / "map" / "point_cloud.csv", result.map_points, delimiter=",", header="x_m,y_m", comments=""
     )
@@ -213,6 +266,36 @@ def export_result(
             header="x_m,y_m,z_m",
             comments="",
         )
+        if result.estimated_3d is not None:
+            np.savetxt(
+                target / "trajectory_3d.csv",
+                np.column_stack((result.timestamps, result.estimated_3d)),
+                delimiter=",",
+                header="timestamp_s,x_m,y_m,z_m,roll_rad,pitch_rad,yaw_rad",
+                comments="",
+            )
+    if result.voxel_map is not None:
+        with (target / "map" / "voxel_grid_3d.csv").open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(
+                ["cell_x", "cell_y", "cell_z", "center_x_m", "center_y_m", "center_z_m", "state", "hits"]
+            )
+            writer.writerows(result.voxel_map.rows())
+        mesh = result.voxel_map.surface()
+        with (target / "map" / "reconstructed_surface.ply").open(
+            "w", encoding="utf-8", newline="\n"
+        ) as stream:
+            stream.write("ply\nformat ascii 1.0\ncomment measured voxel boundary; units meters\n")
+            stream.write(
+                f"element vertex {len(mesh.vertices)}\nproperty float x\nproperty float y\nproperty float z\n"
+            )
+            stream.write(
+                f"element face {len(mesh.triangles)}\nproperty list uchar int vertex_indices\nend_header\n"
+            )
+            for vertex in mesh.vertices:
+                stream.write(" ".join(f"{value:.9g}" for value in vertex) + "\n")
+            for triangle in mesh.triangles:
+                stream.write("3 " + " ".join(str(value) for value in triangle) + "\n")
     if result.occupancy_grid is not None:
         with (target / "map" / "occupancy_grid.csv").open("w", encoding="utf-8", newline="") as stream:
             writer = csv.writer(stream)

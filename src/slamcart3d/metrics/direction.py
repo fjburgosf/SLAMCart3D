@@ -24,6 +24,8 @@ HIGHER_IS_BETTER = frozenset(
 LOWER_IS_BETTER = frozenset(
     {
         "ate_rmse_m",
+        "position_rmse_unaligned_m",
+        "position_final_unaligned_m",
         "rpe_translation_rmse_m",
         "rpe_rotation_rmse_rad",
         "final_position_error_m",

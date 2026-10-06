@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Callable
@@ -14,19 +14,20 @@ import numpy as np
 
 from slamcart3d import __version__
 from slamcart3d.core.config import ExperimentConfig
+from slamcart3d.core.models import Pose2D
 from slamcart3d.core.provenance import source_sha256
+from slamcart3d.mapping.voxel import VoxelMap
 from slamcart3d.metrics.map_quality import point_map_metrics
-from slamcart3d.metrics.map_quality_3d import wall_point_map_metrics_3d
+from slamcart3d.metrics.map_quality_3d import has_evaluable_wall_surface, wall_point_map_metrics_3d
 from slamcart3d.metrics.occupancy_grid import OccupancyGrid
 from slamcart3d.metrics.robustness_score import robustness_score_metrics
 from slamcart3d.metrics.trajectory import trajectory_metrics
 from slamcart3d.metrics.trajectory_geometry import static_wall_contact_steps
 from slamcart3d.sensors.lidar3d import MultiLayerLidar
 from slamcart3d.simulation.observations import ObservationStream
-from slamcart3d.slam.adaptive_hybrid import AdaptiveHybridSLAM
-from slamcart3d.slam.dead_reckoning import DeadReckoningSLAM
-from slamcart3d.slam.icp_odometry import ICPOdometrySLAM
-from slamcart3d.slam.wheel_imu_fusion import WheelIMUFusionSLAM
+from slamcart3d.slam.factory import make_algorithm
+from slamcart3d.slam.hybrid3d import Hybrid3DSLAM
+from slamcart3d.slam.loop_closure import PoseGraphHybridSLAM, rotation
 from slamcart3d.worlds.geometry import World3D
 
 
@@ -49,6 +50,9 @@ class RunResult:
     runtime_s: float
     diagnostics: dict[str, float | int | str | None]
     world: World3D
+    online_estimated: np.ndarray | None = None
+    estimated_3d: np.ndarray | None = None
+    voxel_map: VoxelMap | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,9 @@ class RunStep:
     map_points_added: np.ndarray
     map_points_3d_added: np.ndarray
     occupancy_grid: OccupancyGrid | None
+    navigation: dict[str, float | int | str | None] = field(default_factory=dict)
+    estimated_3d: np.ndarray | None = None
+    voxel_map: VoxelMap | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +95,9 @@ class RunPreview:
     map_points: np.ndarray
     map_points_3d: np.ndarray
     occupancy_grid: OccupancyGrid | None
+    navigation: dict[str, float | int | str | None] = field(default_factory=dict)
+    estimated_3d: np.ndarray | None = None
+    voxel_map: VoxelMap | None = None
 
 
 def _experiment_id(config: ExperimentConfig, created_utc: str) -> str:
@@ -122,35 +132,7 @@ def run_simulation(
             )
         )
         callback_duration += time.perf_counter() - callback_started
-    if config.slam.algorithm == "dead_reckoning":
-        algorithm = DeadReckoningSLAM(
-            config.robot.wheel_radius_m, config.robot.wheel_base_m, config.lidar.max_range_m
-        )
-    elif config.slam.algorithm == "wheel_imu_fusion":
-        algorithm = WheelIMUFusionSLAM(
-            config.robot.wheel_radius_m, config.robot.wheel_base_m, config.lidar.max_range_m
-        )
-    elif config.slam.algorithm == "adaptive_hybrid":
-        algorithm = AdaptiveHybridSLAM(
-            config.robot.wheel_radius_m,
-            config.robot.wheel_base_m,
-            config.lidar.max_range_m,
-            config.slam.icp_max_iterations,
-            config.slam.icp_max_correspondence_m,
-            config.slam.icp_prior_weight,
-            config.slam.hybrid_use_imu,
-            config.slam.hybrid_adaptive_trust,
-            config.slam.hybrid_gate_map,
-        )
-    else:
-        algorithm = ICPOdometrySLAM(
-            config.robot.wheel_radius_m,
-            config.robot.wheel_base_m,
-            config.lidar.max_range_m,
-            config.slam.icp_max_iterations,
-            config.slam.icp_max_correspondence_m,
-            config.slam.icp_prior_weight,
-        )
+    algorithm = make_algorithm(config)
     algorithm.initialize(initial)
     timestamps = stream.timestamps
     ground_truth = [initial.as_array()]
@@ -158,30 +140,58 @@ def run_simulation(
     lidar3d = MultiLayerLidar(config.lidar3d) if config.lidar3d.enabled else None
     occupancy_grid = (
         OccupancyGrid(config.occupancy_grid.resolution_m, config.occupancy_grid.beam_stride)
-        if config.occupancy_grid.enabled
+        if config.occupancy_grid.enabled or config.simulation.motion_profile == "frontier"
         else None
     )
     clouds_3d: list[np.ndarray] = []
+    states_3d = [np.array([initial.x, initial.y, 0.0, 0.0, 0.0, initial.yaw])]
+    voxel_map = (
+        VoxelMap(config.reconstruction.resolution_m, config.reconstruction.min_hits)
+        if (config.lidar3d.enabled and config.reconstruction.enabled)
+        else None
+    )
     previous_map_count = 0
     blocked_steps = 0
-    for index, frame in enumerate(stream.frames(), start=1):
+    scans_for_rebuild = []
+    for index, frame in enumerate(stream.frames(algorithm.get_pose), start=1):
         blocked_steps += int(frame.blocked_by_wall)
-        estimated_pose = algorithm.update(
+        update = algorithm.update_3d if isinstance(algorithm, Hybrid3DSLAM) else algorithm.update
+        extra = (frame.measured_lidar3d,) if isinstance(algorithm, Hybrid3DSLAM) else ()
+        estimated_pose = update(
             frame.timestamp_s,
             frame.measured_left_rate_rad_s,
             frame.measured_right_rate_rad_s,
             config.simulation.timestep_s,
             frame.measured_lidar,
             frame.measured_imu,
+            *extra,
         )
         ground_truth.append(frame.ground_truth.as_array())
         estimated.append(estimated_pose.as_array())
+        states_3d.append(
+            algorithm.state.copy()
+            if isinstance(algorithm, Hybrid3DSLAM)
+            else np.array([estimated_pose.x, estimated_pose.y, 0.0, 0.0, 0.0, estimated_pose.yaw])
+        )
         if occupancy_grid is not None:
             occupancy_grid.observe(frame.measured_lidar, estimated_pose, config.lidar.max_range_m)
+        if isinstance(algorithm, PoseGraphHybridSLAM):
+            scans_for_rebuild.append(frame.measured_lidar)
         new_cloud = np.empty((0, 3), dtype=float)
         if lidar3d is not None and frame.measured_lidar3d is not None:
-            new_cloud = lidar3d.point_cloud(frame.measured_lidar3d, estimated_pose)
+            new_cloud = (
+                algorithm._last_cloud.copy()
+                if isinstance(algorithm, Hybrid3DSLAM)
+                else (lidar3d.point_cloud(frame.measured_lidar3d, estimated_pose))
+            )
             clouds_3d.append(new_cloud)
+        origin = (
+            algorithm.sensor_origin()
+            if isinstance(algorithm, Hybrid3DSLAM)
+            else np.array([estimated_pose.x, estimated_pose.y, config.lidar3d.sensor_height_m])
+        )
+        if voxel_map is not None:
+            voxel_map.observe(origin, new_cloud)
         if on_step is not None:
             callback_started = time.perf_counter()
             current_map = algorithm.get_map()
@@ -197,12 +207,33 @@ def run_simulation(
                     current_map[previous_map_count:].copy(),
                     new_cloud.copy(),
                     deepcopy(occupancy_grid),
+                    dict(stream.navigation_diagnostics),
+                    states_3d[-1].copy(),
+                    deepcopy(voxel_map) if index % 10 == 0 or index == len(timestamps) - 1 else None,
                 )
             )
             previous_map_count = len(current_map)
             callback_duration += time.perf_counter() - callback_started
     truth_array = np.asarray(ground_truth)
     estimate_array = np.asarray(estimated)
+    online_estimated = None
+    if isinstance(algorithm, PoseGraphHybridSLAM):
+        online_estimated = estimate_array.copy()
+        estimate_array = algorithm.finalize()
+        states_3d = [np.array([pose[0], pose[1], 0.0, 0.0, 0.0, pose[2]]) for pose in estimate_array]
+        for index, cloud in enumerate(clouds_3d):
+            old, new = online_estimated[index + 1], estimate_array[index + 1]
+            cloud[:, :2] = (cloud[:, :2] - old[:2]) @ rotation(old[2]) @ rotation(new[2]).T + new[:2]
+        if voxel_map is not None:
+            voxel_map = VoxelMap(config.reconstruction.resolution_m, config.reconstruction.min_hits)
+            for cloud, pose in zip(clouds_3d, estimate_array[1:], strict=True):
+                voxel_map.observe(np.array([pose[0], pose[1], config.lidar3d.sensor_height_m]), cloud)
+        if occupancy_grid is not None:
+            occupancy_grid = OccupancyGrid(
+                config.occupancy_grid.resolution_m, config.occupancy_grid.beam_stride
+            )
+            for scan, pose in zip(scans_for_rebuild, estimate_array[1:], strict=True):
+                occupancy_grid.observe(scan, Pose2D(*pose), config.lidar.max_range_m)
     metrics = trajectory_metrics(truth_array, estimate_array)
     metrics["ground_truth_static_wall_contact_steps"] = float(
         static_wall_contact_steps(truth_array, stream.world)
@@ -211,16 +242,29 @@ def run_simulation(
     map_points = algorithm.get_map()
     map_points_3d = np.vstack(clouds_3d) if clouds_3d else np.empty((0, 3), dtype=float)
     metrics.update(point_map_metrics(map_points, stream.world))
-    if config.lidar3d.enabled:
+    if config.lidar3d.enabled and has_evaluable_wall_surface(stream.world):
         metrics.update(wall_point_map_metrics_3d(map_points_3d, stream.world))
     if occupancy_grid is not None:
         metrics.update(occupancy_grid.metrics(stream.world))
     diagnostics = algorithm.get_diagnostics()
-    if config.slam.algorithm in {"icp_odometry", "adaptive_hybrid"} and int(diagnostics["updates"]) > 1:
+    diagnostics.update(stream.navigation_diagnostics)
+    if online_estimated is not None:
+        diagnostics["online_ate_rmse_m"] = trajectory_metrics(truth_array, online_estimated)["ate_rmse_m"]
+    if (
+        config.slam.algorithm in {"icp_odometry", "adaptive_hybrid", "posegraph_hybrid", "hybrid_3d"}
+        and int(diagnostics["updates"]) > 1
+    ):
         attempted_registrations = int(diagnostics["updates"]) - 1
         metrics["icp_registration_availability"] = (
             attempted_registrations - int(diagnostics["fallbacks"])
         ) / attempted_registrations
+    if isinstance(algorithm, Hybrid3DSLAM):
+        states = np.asarray(states_3d)
+        metrics["pose3d_z_rmse_m"] = float(np.sqrt(np.mean(states[:, 2] ** 2)))
+        metrics["pose3d_roll_pitch_rmse_rad"] = float(np.sqrt(np.mean(states[:, 3:5] ** 2)))
+    if voxel_map is not None:
+        metrics["reconstruction_occupied_voxels"] = float(len(voxel_map.occupied))
+        metrics["reconstruction_free_voxels"] = float(len(voxel_map.free))
     if config.robustness_score.enabled:
         metrics.update(robustness_score_metrics(metrics, config.robustness_score))
     metrics["runtime_s"] = float(max(0.0, time.perf_counter() - started - callback_duration))
@@ -240,4 +284,7 @@ def run_simulation(
         runtime_s=metrics["runtime_s"],
         diagnostics=diagnostics,
         world=stream.world,
+        online_estimated=online_estimated,
+        estimated_3d=np.asarray(states_3d),
+        voxel_map=voxel_map,
     )

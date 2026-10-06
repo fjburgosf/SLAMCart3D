@@ -34,6 +34,7 @@ def generate_dataset(config: ExperimentConfig, output_root: str | Path = "datase
     )
     metadata = {
         "dataset_id": dataset_id,
+        "data_origin": "synthetic_simulation",
         "created_utc": created,
         "software_version": __version__,
         "source_sha256": source_sha256(),

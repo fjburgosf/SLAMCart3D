@@ -1,0 +1,28 @@
+experiment:
+  name: measured_3d_reconstruction
+  seed: 42
+  simulation:
+    world: indoor_simple
+    motion_profile: frontier
+    duration_s: 30.0
+    timestep_s: 0.1
+    linear_velocity_m_s: 0.4
+    stop_at_walls: true
+  slam:
+    algorithm: hybrid_3d
+    icp_max_iterations: 8
+  lidar:
+    beam_count: 60
+  lidar3d:
+    enabled: true
+    azimuth_beams: 60
+    elevation_beams: 8
+    vertical_fov_deg: 50.0
+  occupancy_grid:
+    enabled: true
+    resolution_m: 0.25
+    beam_stride: 1
+  reconstruction:
+    enabled: true
+    resolution_m: 0.25
+    min_hits: 2

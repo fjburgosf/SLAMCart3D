@@ -14,6 +14,12 @@ WALL_3D_MATCH_TOLERANCE_M = 0.25
 GROUND_EXCLUSION_HEIGHT_M = 0.1
 
 
+def has_evaluable_wall_surface(world: World3D) -> bool:
+    """Whether the default ground exclusion leaves a static-wall reference."""
+
+    return any(wall.height_m > GROUND_EXCLUSION_HEIGHT_M + 1e-9 for wall in world.segments)
+
+
 def sample_wall_surface_points(
     world: World3D,
     spacing_m: float = WALL_SURFACE_SAMPLE_SPACING_M,
